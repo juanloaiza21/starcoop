@@ -334,7 +334,11 @@ What exists and is proven offline:
 | `domain/latency` — live submit budget (D-11) | done |
 | `domain/auction` — ruleset resolution, fail-closed on unknown shapes | done, multi-lot included |
 | `domain/replay` — offline replay of the captured auction | done, reproduces the ground truth |
-| Transport (SignalR), auth bootstrap, submit gateway, operator UI | **not started** |
+| `transport/signalr` — classic-SignalR wire format, cursor discipline | done, pinned against captured frames |
+| `strategy/engine` — hold / bid / stop / skip decisions | done |
+| `config/floor` — the floor sheet as a controlled document | done |
+| `simulation` + `cli` — dress rehearsal over the captured auction | done |
+| SignalR **connection loop**, auth bootstrap, submit gateway, operator UI | **not started** |
 
 Nothing in the repository can reach the live platform yet, which is deliberate: the
 read-only observer phase comes before any code that can write.
