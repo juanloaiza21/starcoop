@@ -122,6 +122,47 @@ def main():
     # ---- 3. Auth headers
     w('## 3. Authentication')
     w('')
+
+    # The HAR export stripped headers. Prove it by byte-accounting so nobody
+    # mistakenly concludes the REST API is unauthenticated.
+    w('### IMPORTANT: the capture was sanitised — REST auth headers were stripped')
+    w('')
+    w('The `headers` array below shows **no** `Cookie` and **no** `Authorization` header on')
+    w('the `/v1/` REST calls. Do **not** conclude the API is unauthenticated. Byte-accounting')
+    w('the requests proves headers were removed on export:')
+    w('')
+    w('| Request | Visible header bytes | Reported `headersSize` | Unaccounted |')
+    w('|---|---:|---:|---:|')
+    shown = 0
+    for e in entries:
+        r = e['request']
+        if 'eauctions.api' not in r['url'] or '/v1/' not in r['url']:
+            continue
+        if r.get('headersSize', -1) <= 0:
+            continue
+        vis = sum(len(h['name']) + len(h['value']) + 4 for h in r['headers'])
+        line = len(r['method']) + len(r['url']) + len(r['httpVersion']) + 4
+        gap = r['headersSize'] - vis - line
+        name = urlparse(r['url']).path.split('/')[-2:]
+        w(f'| `{"/".join(name)[:40]}` | {vis} | {r["headersSize"]} | **{gap}** |')
+        shown += 1
+        if shown >= 5:
+            break
+    w('')
+    w('Roughly 2.5 KB per request is missing. That is the size of a VORTAL/ASP.NET session')
+    w('cookie jar. **DERIVED conclusion:** the auction REST API authenticates via session')
+    w('cookies (and possibly a bearer token) that this capture does not contain.')
+    w('')
+    w('**Architectural consequence:** the client cannot authenticate with the JWT alone.')
+    w('The JWT is only proven to authenticate the SignalR transport (`token` query param).')
+    w('REST calls need the browser session cookie jar, which is why session bootstrap must')
+    w('go through a real browser and export full storage state — not just a decoded token.')
+    w('')
+    w('**OPEN QUESTION:** confirm the exact REST auth mechanism by inspecting the live')
+    w('requests in a fresh, unsanitised capture before implementing the client.')
+    w('')
+    w('### Headers that *were* preserved')
+    w('')
     for e in entries:
         if 'eauctions.api' in e['request']['url'] and '/v1/' in e['request']['url']:
             w('Headers sent to the auction API (values redacted):')

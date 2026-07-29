@@ -656,6 +656,34 @@ Response (200):
 
 ## 3. Authentication
 
+### IMPORTANT: the capture was sanitised — REST auth headers were stripped
+
+The `headers` array below shows **no** `Cookie` and **no** `Authorization` header on
+the `/v1/` REST calls. Do **not** conclude the API is unauthenticated. Byte-accounting
+the requests proves headers were removed on export:
+
+| Request | Visible header bytes | Reported `headersSize` | Unaccounted |
+|---|---:|---:|---:|
+| `localization/GetResourceLocaleString` | 725 | 3434 | **2528** |
+| `e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca/es-` | 725 | 3377 | **2528** |
+| `chat/GetAllMessages` | 725 | 3407 | **2528** |
+| `700961121/0` | 725 | 3384 | **2528** |
+| `GetAuctionSimple/e66a68a3-a14b-4d8a-8f8e` | 725 | 3377 | **2528** |
+
+Roughly 2.5 KB per request is missing. That is the size of a VORTAL/ASP.NET session
+cookie jar. **DERIVED conclusion:** the auction REST API authenticates via session
+cookies (and possibly a bearer token) that this capture does not contain.
+
+**Architectural consequence:** the client cannot authenticate with the JWT alone.
+The JWT is only proven to authenticate the SignalR transport (`token` query param).
+REST calls need the browser session cookie jar, which is why session bootstrap must
+go through a real browser and export full storage state — not just a decoded token.
+
+**OPEN QUESTION:** confirm the exact REST auth mechanism by inspecting the live
+requests in a fresh, unsanitised capture before implementing the client.
+
+### Headers that *were* preserved
+
 Headers sent to the auction API (values redacted):
 ```http
 Accept: application/json, text/plain, */*
