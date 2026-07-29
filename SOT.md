@@ -21,11 +21,17 @@ STARCOOP is a Colombian security-guard services cooperative that wins revenue by
 competing for public contracts. Many of those contracts are awarded through SECOP II
 *subastas inversas electrónicas* — electronic reverse auctions where qualified bidders
 undercut each other in a ten-minute window and the lowest compliant price wins. Today a
-human sits in front of a browser and clicks. That human is slow, gets disconnected, and
-cannot compute the profitable stopping point under time pressure. This project replaces
-that human's *hands* — not their judgement — with software that reacts in milliseconds,
-never loses the connection, and is physically incapable of bidding below a floor price
-that a human set in advance.
+human sits in front of a browser and clicks. That human gets disconnected, loses track of
+the arithmetic under time pressure, and cannot reliably judge when to stop. This project
+replaces that human's *hands* — not their judgement — with software that stays connected
+when most of the room cannot, always computes a legal bid, and is physically incapable of
+bidding below a floor price that a human set in advance.
+
+It is worth being precise about where the advantage actually comes from, because the
+obvious answer is wrong. The platform itself is slow: a bid submission costs two round
+trips whose 90th percentile is around seven seconds each (§4.5). Reacting in milliseconds
+buys nothing. The edge is **reliability and discipline** — never dropping out, never
+miscalculating, never chasing a price below cost — not raw speed.
 
 **Read [`docs/00-context.md`](docs/00-context.md) first if you are new to the domain.**
 
@@ -77,7 +83,7 @@ redacting credentials as it goes.
 
 ---
 
-## 4. The five facts that shape the entire design
+## 4. The nine facts that shape the entire design
 
 Everything in the architecture traces back to one of these.
 
@@ -126,7 +132,44 @@ The `auction.RequestClock` / `auction.ReceiveClock` pair is the authoritative cl
 system time is irrelevant. Every deadline decision uses a round-trip-compensated offset
 against server time.
 
-### 4.5 The minimum decrement rule is CONFIRMED — 1% of the *initial* price
+**Do not estimate the clock offset from the long-poll response.** The obvious NTP-style
+midpoint estimate is invalid here: `/signalr/poll` is a *long poll* that holds the
+connection open (median 1.5 s, p90 20 s, observed maximum 110 s) and the server emits the
+clock at an arbitrary moment during that hold. Applying the midpoint assumption to our
+capture yields offsets scattered across a 14-second range — pure noise. Offset must be
+derived from the short `/signalr/send` round trip instead.
+
+### 4.5 The platform is slow and wildly variable — this dominates the timing budget
+Measured from the capture, by request class:
+
+| Request class | min | p50 | p90 | max |
+|---|---:|---:|---:|---:|
+| `signalr/send` (short POST, true RTT) | 92 ms | **832 ms** | 3 744 ms | 9 732 ms |
+| REST `/v1/*` (incl. `ValidateBid`) | 137 ms | **941 ms** | 6 861 ms | 10 067 ms |
+| `signalr/connect` | 98 ms | 433 ms | 5 010 ms | 5 010 ms |
+
+A submit is **two** sequential round trips — `ValidateBid` then `SubmitBid`. At p90 that
+is roughly **14 seconds**, and the tail reaches 20.
+
+The consequences are severe and they contradict the intuitive design:
+
+- **Sub-second reaction speed is not the bottleneck.** Shaving milliseconds off local
+  decision-making is irrelevant next to a p90 seven-second server response. Effort spent
+  on micro-optimising the hot path is wasted.
+- **Sniping is impossible on this platform**, independent of the auto-extension rule in
+  §4.2. You cannot decide at T-2 s and expect the bid to land; the platform may not answer
+  for ten seconds.
+- **The bot must maintain a latency budget** — a live estimate of how long a
+  validate-plus-submit cycle currently takes — and commit to its final bid while at least
+  the p90 of that budget remains. Acting later is gambling.
+- **Bids must be idempotent and reconciled.** With ten-second tails, a timeout does not
+  mean the bid failed. The bot must resolve what actually happened via `GetSupplierBids`
+  and the audit log before retrying, or it risks double-bidding against itself.
+
+This is the finding that most changes how the runtime should be built, and it is
+reproducible from [`fixtures/auction-sasi-001-2026.json`](fixtures/auction-sasi-001-2026.json).
+
+### 4.6 The minimum decrement rule is CONFIRMED — 1% of the *initial* price
 `GET /v1/auction/GetAuction/{id}/{locale}` (the full variant, richer than
 `GetAuctionSimple`) returns `minimumBidType: "Percentage"` where the simple variant
 returns the integer `1`, and each price-list item carries `minBidDifference: 1.0`.
@@ -139,7 +182,7 @@ percentage of the current best. This is now **CONFIRMED**, not assumed.
 > returns opaque integer enums and omits `minBidDifference` entirely. Every rule the bot
 > depends on lives in the full payload.
 
-### 4.6 The platform deliberately anonymises competitors — respect that
+### 4.7 The platform deliberately anonymises competitors — respect that
 Competitor records return `companyName: "Proveedor J"`, `alias: "J"` and
 `companyNIF`/`companyContact`/`companyEmail` all set to the sentinel
 `"Settings_Confidential"`. The platform is intentionally concealing who you are bidding
@@ -156,7 +199,7 @@ the *anonymous* price signals; it may not resolve `companyCode` to an identity. 
 hard rule, recorded as decision **D-09** below and expanded in
 [`docs/05-compliance.md`](docs/05-compliance.md).
 
-### 4.7 The captures were sanitised — the JWT alone is not enough to authenticate
+### 4.8 The captures were sanitised — the JWT alone is not enough to authenticate
 The HAR shows no `Cookie` or `Authorization` header on the REST calls, but byte-accounting
 proves a constant **2 528 bytes** of headers were stripped from every single request — the
 size of a VORTAL/ASP.NET session cookie jar. The JWT is only *proven* to authenticate the
@@ -167,7 +210,7 @@ tracked as an open question.
 
 ---
 
-### 4.8 The captured auction had 44 live competitors — speed alone will not save us
+### 4.9 The captured auction had 44 live competitors — speed alone will not save us
 `GetAuction` listed **48 registered bidders**, and the SignalR `chat` roster shows
 **44 distinct companies actually connected** — a 92% participation rate, fighting over a
 single 115 M COP contract with a fixed 1% step.
@@ -184,7 +227,7 @@ This is why [`docs/06-tender-discovery.md`](docs/06-tender-discovery.md) is not 
 afterthought, and why the bot's most valuable output on many auctions will be the
 decision **not to bid**.
 
-### 4.9 Every action is logged, including failures, with our IP attached
+### 4.10 Every action is logged, including failures, with our IP attached
 `GET /v1/audit/GetEventLogs` returns the platform's permanent record. It contains rows
 like `"Error cuando presentado el lance. Problema: ..."` — **a bid that fails validation
 is not discarded, it is recorded**, along with `ipAddress` and `userCode`, where the
@@ -210,15 +253,18 @@ These are settled. Reopening one requires a new entry in the decision log in
 | # | Decision | Rationale |
 |---|---|---|
 | D-01 | **A floor price is mandatory and is enforced in independent layers** | The asymmetric failure mode in §4.1. No single bug may be able to defeat it. |
-| D-02 | **`ValidateBid` always precedes `SubmitBid`** | Rejected bids are written permanently to an audit trail the buyer can read (§4.9). Validation is free and silent; rejection is public and attributed. |
-| D-03 | **Browser-assisted session bootstrap** | Login is reCAPTCHA-gated and REST likely needs cookies (§4.5). Fully headless unattended auth is not achievable or honest to promise. |
+| D-02 | **`ValidateBid` always precedes `SubmitBid`** | Rejected bids are written permanently to an audit trail the buyer can read (§4.10). Validation is free and silent; rejection is public and attributed. |
+| D-03 | **Browser-assisted session bootstrap** | Login is reCAPTCHA-gated and REST likely needs cookies (§4.8). Fully headless unattended auth is not achievable or honest to promise. |
 | D-04 | **Read-only observer before any automated bid** | The `SubmitBid` contract was never captured. We learn it by watching a real auction and submitting nothing. |
 | D-05 | **Nothing hardcoded to one auction, company or lot shape** | The user's explicit requirement that it "work universally everywhere". |
 | D-06 | **Secrets never enter git; the leaked token is treated as compromised** | §3. |
 | D-07 | **Polite rate limiting against a government platform** | It is a public system. Being aggressive is both wrong and the fastest route to a banned account. |
 | D-08 | **A human kill switch that works instantly** | The operator must always be able to take back control. |
-| D-09 | **Never resolve a competitor's `companyCode` to an identity** | The platform anonymises rivals on purpose (§4.6). Knowing who is in the room enables the coordination that is criminal in Colombia. |
-| D-10 | **Read auction rules from the full `GetAuction`, never `GetAuctionSimple`** | The simple variant returns opaque integer enums and omits `minBidDifference` (§4.5). |
+| D-09 | **Never resolve a competitor's `companyCode` to an identity** | The platform anonymises rivals on purpose (§4.7). Knowing who is in the room enables the coordination that is criminal in Colombia. |
+| D-10 | **Read auction rules from the full `GetAuction`, never `GetAuctionSimple`** | The simple variant returns opaque integer enums and omits `minBidDifference` (§4.6). |
+| D-11 | **Maintain a live latency budget and commit the final bid while at least its p90 remains** | The platform's p90 response is ~7 s per round trip and a submit costs two (§4.5). Acting later is gambling, not sniping. |
+| D-12 | **Treat a timed-out submit as unknown, never as failed** | With ten-second tails, a timeout does not mean the bid did not land. Reconcile via `GetSupplierBids` and the audit log before retrying, or risk bidding against ourselves. |
+| D-13 | **Derive the clock offset from `signalr/send` round trips, never from the long poll** | The long poll holds for up to 110 s and the server emits the clock at an arbitrary point within it, so the midpoint estimate is noise (§4.4). |
 
 ---
 
@@ -254,7 +300,7 @@ The largest unknowns blocking implementation:
 | The `SubmitBid` request/response contract | We cannot place a bid without it | Phase 2 read-only observer on a live auction |
 | Whether the **first bid must equal the base price** | Costs an extra round trip before reaching a competitive price, changing the timing budget | Observation; the platform's own error string asserts it (see [`docs/09-platform-vocabulary.md`](docs/09-platform-vocabulary.md)) |
 | The other `minimumBidType` values | We have confirmed `Percentage` only; `Value`/`None` presumably exist | Observe auctions with differing configurations |
-| Exact REST authentication (§4.7) | Determines the session model | Fresh unsanitised capture |
+| Exact REST authentication (§4.8) | Determines the session model | Fresh unsanitised capture |
 | Whether extra time triggers on any bid or only a winner-changing bid | Changes end-game strategy | Observation |
 | Platform ToS position on automation | Determines whether we proceed at all | [`docs/05-compliance.md`](docs/05-compliance.md) |
 
