@@ -130,4 +130,19 @@ uv venv --python 3.12 && uv pip install -e ".[dev]"
 pytest && ruff check src tests && mypy
 ```
 
+### Try it
+
+Validate a floor sheet, then replay the real captured auction through the decision
+engine and watch what the bot would have done:
+
+```bash
+centinela check-floor examples/floor-sheet.example.yaml
+centinela replay fixtures/auction-sasi-001-2026.json \
+          --floor-sheet examples/floor-sheet.example.yaml
+```
+
+On the captured auction it stops immediately and explains why — a rival bid 0,00 COP,
+so no legal bid clears the floor and the only correct move is not to play. That is the
+behaviour worth having: the bot's most valuable output on a bad auction is refusing it.
+
 See [`docs/08-roadmap.md`](docs/08-roadmap.md) for the phased plan and the next actions.
