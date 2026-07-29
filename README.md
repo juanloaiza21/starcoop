@@ -57,6 +57,11 @@ docs/
 tools/
   digest_har.py              Distils HAR captures into the API contract, redacting secrets
   extract_vocabulary.py      Extracts the platform vocabulary and error keys
+  build_replay_fixture.py    Builds the offline replay fixture from captures
+  analyze_timing.py          Measures platform latency and connection churn
+fixtures/
+  auction-sasi-001-2026.json Replayable trace of a real auction
+  bid-validation-vectors.json Conformance vectors for bid legality
 ```
 
 ## Regenerating the API contract

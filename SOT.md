@@ -139,6 +139,16 @@ clock at an arbitrary moment during that hold. Applying the midpoint assumption 
 capture yields offsets scattered across a 14-second range — pure noise. Offset must be
 derived from the short `/signalr/send` round trip instead.
 
+**The clock is also coarse.** Observed `ReceiveClock` ticks arrive at a median interval of
+**9.3 s**, with gaps up to **30 s**. The bot therefore cannot simply wait for a tick to
+learn the time: it must hold a local estimate `serverTime ≈ localClock + offset`,
+extrapolate between ticks, and correct the offset when a tick lands. Treating the last
+received tick as "now" would leave it up to half a minute stale at exactly the moment
+precision matters.
+
+All of the numbers in §4.4 and §4.5 are reproducible with
+`python3 tools/analyze_timing.py <har-dir>`.
+
 ### 4.5 The platform is slow and wildly variable — this dominates the timing budget
 Measured from the capture, by request class:
 
