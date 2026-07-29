@@ -165,6 +165,24 @@ This is why [`docs/06-tender-discovery.md`](docs/06-tender-discovery.md) is not 
 afterthought, and why the bot's most valuable output on many auctions will be the
 decision **not to bid**.
 
+### 4.9 Every action is logged, including failures, with our IP attached
+`GET /v1/audit/GetEventLogs` returns the platform's permanent record. It contains rows
+like `"Error cuando presentado el lance. Problema: ..."` — **a bid that fails validation
+is not discarded, it is recorded**, along with `ipAddress` and `userCode`, where the
+contracting entity can read it.
+
+Two consequences:
+
+- A bot that sprays speculative bids publishes a log of its own malfunction on a
+  government platform under STARCOOP's name. Validation is free and leaves no trace;
+  rejection is permanent. This is the real justification for decision **D-02**.
+- Our network origin is attributable. The bot should run from a **stable, attributable
+  connection**. Rotating or anonymising IPs would serve no legitimate purpose here and
+  would look evasive in precisely the record a dispute would examine.
+
+The audit log is also the **reconciliation source of truth** after a dropped connection:
+it answers "what did I miss?" in a way the realtime stream cannot.
+
 ## 5. Decisions already made
 
 These are settled. Reopening one requires a new entry in the decision log in
@@ -173,7 +191,7 @@ These are settled. Reopening one requires a new entry in the decision log in
 | # | Decision | Rationale |
 |---|---|---|
 | D-01 | **A floor price is mandatory and is enforced in independent layers** | The asymmetric failure mode in §4.1. No single bug may be able to defeat it. |
-| D-02 | **`ValidateBid` always precedes `SubmitBid`** | The platform will tell us if a bid is illegal. Never guess. |
+| D-02 | **`ValidateBid` always precedes `SubmitBid`** | Rejected bids are written permanently to an audit trail the buyer can read (§4.9). Validation is free and silent; rejection is public and attributed. |
 | D-03 | **Browser-assisted session bootstrap** | Login is reCAPTCHA-gated and REST likely needs cookies (§4.5). Fully headless unattended auth is not achievable or honest to promise. |
 | D-04 | **Read-only observer before any automated bid** | The `SubmitBid` contract was never captured. We learn it by watching a real auction and submitting nothing. |
 | D-05 | **Nothing hardcoded to one auction, company or lot shape** | The user's explicit requirement that it "work universally everywhere". |
