@@ -3,7 +3,7 @@
 *Normative specification of how a SECOP II (VORTAL eAuctions) reverse auction actually behaves — states, clocks, decrements, extensions, visibility, and validation — precise enough to implement `domain/` and `guard/` directly from this chapter.*
 
 **Target engine:** `subastas.secop.gov.co/eauctions.api` (VORTAL eAuctions, © VORTAL 2019, ASP.NET backend + AngularJS 1.x client).
-**Evidence base:** 5 HAR captures + 65-minute screen recording of tender SASI-001-2026, auction `e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca`, 2026-03-02, entity INSTITUTO DISTRITAL DE PROTECCIÓN Y BIENESTAR ANIMAL, our company code `700961121` (alias "Proveedor AB"), plus one cross-auction data point (UNP SASI-064-2026).
+**Evidence base:** 5 HAR captures + 65-minute screen recording of tender SASI-001-2026, auction `e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca`, 2026-03-02, entity INSTITUTO DISTRITAL DE PROTECCIÓN Y BIENESTAR ANIMAL, our company code `700961121` (alias "Proveedor AB"), plus one documentary cross-auction data point, the published pliego of UNP SASI-064-2026 (not an API observation).
 **Status:** supersedes the informal notes in [01-api-contract.md](01-api-contract.md) for everything concerning auction *mechanics*. Wire formats stay in [03-client-protocol.md](03-client-protocol.md); what to *do* with these rules is [04-strategy-engine.md](04-strategy-engine.md); why some of these rules are legal obligations is [05-compliance.md](05-compliance.md); where each rule lives in code is [07-architecture.md](07-architecture.md).
 
 ---
@@ -28,7 +28,7 @@ Every claim in this chapter carries one of three tags. An engineer implementing 
 6. **`GetAuctionSimple` serves stale reads that go backwards.** At server time: 20:30:03 → `Started`; 20:30:06 → `ReadyToStart`; 20:30:09 → `ReadyToStart`; 20:30:12 → `Started`. The `Logs_Search_AuctionStart` event fired exactly once, at 20:30:12.43. **CONFIRMED**: the read path is eventually consistent and non-monotonic.
 7. **`auction.newData([true,false,false])` fires ~60–130 ms after each accepted bid** (fired exactly twice, matching the two rival bids at 20:30:16.74 and 20:30:19.98). **CONFIRMED.** It is the bid-notification edge.
 8. **Platform latency is the binding real-time constraint.** Non-SignalR REST: n=26, p50 **835 ms**, p90 **6.9 s**, max **10.1 s**. `ValidateBid` itself: 403 ms and **4 637 ms**. `GetSupplierBids`: up to 9.0 s. **CONFIRMED.**
-9. **Cross-auction counterexample (UNP SASI-064-2026):** a rejected validation in a *different* auction reported a `minBid` equal to **2 % of the last valid lance**, not of the start price. **CONFIRMED as an observation of that auction**; its `minimumBidType` was not captured. Consequence: the *base* of the percentage rule is not platform-constant. See §4.6 and O-M1.
+9. **Cross-auction counterexample (UNP SASI-064-2026):** the published *pliego* for that tender specifies a margen mínimo of **2 % of the last valid lance**, not of the start price. **DOCUMENTARY — this is text in a tender document, not an observed API rejection.** That auction had not run at the time of writing (offers due 2026-08-12), so no `ValidateBid` response from it exists and its `minimumBidType` is unknown. Consequence: the *base* of the percentage rule is not platform-constant. See §4.6 and O-M1.
 
 > **Security note on the evidence itself:** the screen recording contains, in cleartext, the SECOP login form payload (username + password) and a full Bearer JWT rendered in DevTools. Treat that artefact as a credential-bearing file: restrict access, rotate the account password before this project ships. Neither value is transcribed anywhere in this documentation set.
 
@@ -294,7 +294,7 @@ round_up(x, 2) ≡ ceil(x × 100) / 100           # ROUND_CEILING for positive v
 
 ### 4.6 The base of the percentage — a live cross-auction contradiction
 
-Finding 0.1.9 is the reason §4.2's verdict is scoped to *this auction*: in UNP SASI-064-2026 a rejection's `minBid` equalled **2 % of the last valid lance** — a base that demonstrably shrinks as the price falls, unlike the fixed base proven for SASI-001-2026. The two observations cannot be satisfied by one universal formula, so the base is controlled by something we have not yet pinned — most plausibly the `minimumBidType` value (§4.3 row `2`), possibly an uncaptured sibling field. **This is open question O-M1** and it is governed by the architecture's decision rule ([Architecture §1.4](07-architecture.md)): δ is *read* from `GetAuction`, *calibrated* against at most two rejections, and never *assumed* from any single-auction hypothesis.
+Finding 0.1.9 is the reason §4.2's verdict is scoped to *this auction*: the UNP SASI-064-2026 pliego specifies a margen mínimo of **2 % of the last valid lance** — a base that shrinks as the price falls, unlike the fixed base proven for SASI-001-2026. One observation and one documented configuration cannot be satisfied by a single universal formula, so the base is controlled by something we have not yet pinned — most plausibly the `minimumBidType` value (§4.3 row `2`), possibly an uncaptured sibling field. **This is open question O-M1** and it is governed by the architecture's decision rule ([Architecture §1.4](07-architecture.md)): δ is *read* from `GetAuction`, *calibrated* against at most two rejections, and never *assumed* from any single-auction hypothesis.
 
 Per-auction calibration procedure (normative):
 
@@ -534,7 +534,7 @@ Numbered `O-M*` to keep them distinct from the protocol-level unknowns (O1, O2, 
 
 | ID | Question | Blast radius if wrong | Interim mitigation |
 |---|---|---|---|
-| **O-M1** | What selects the percentage *base* — `itemInitialPrice` (SASI-001-2026) vs last valid lance (UNP SASI-064-2026)? Keyed by `minimumBidType` or another field? | wrong δ → rejected bids (burned budget) or over-conceded margin | dual-candidate calibration §4.6; RULE M-2 |
+| **O-M1** | What selects the percentage *base* — `itemInitialPrice` (observed, SASI-001-2026) vs last valid lance (documented in the UNP SASI-064-2026 pliego)? Keyed by `minimumBidType` or another field? | wrong δ → rejected bids (burned budget) or over-conceded margin | dual-candidate calibration §4.6; RULE M-2 |
 | **O-M2** | Exact enum for `minimumBidType` values `0`, `2`, `3+` | unknown-rule auctions unbiddable | RULE M-1 fail-closed mode |
 | **O-M3** | Is R4 the true reference rule? (needs a captured *accepted* bid — couples to the SubmitBid contract, O2) | validation surprises mid-auction | RULE R-3 freeze-on-contradiction |
 | **O-M4** | `activateExtraTimeWinner` trigger: any bid vs winner-changing bid | mispredicted auction length | RULE X-3 asymmetric assumption |

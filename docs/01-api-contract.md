@@ -889,14 +889,35 @@ Example rows (10 of 10 returned):
 
 ### Two consequences that shape the design
 
-**1. Rejected bids are permanently logged.** Note the row with description
-`"Error cuando presentado el lance. Problema: ..."`. A bid that fails validation
-is not discarded — it is written to an audit trail that the contracting entity
-can read. A bot that sprays speculative bids would leave a visible record of
-malfunction on a government platform, attached to STARCOOP's name.
+**1. A failed `ValidateBid` writes a permanent, entity-visible audit row.**
 
-This is the evidence behind the rule that **`ValidateBid` always precedes
-`SubmitBid`**: validation is free and leaves no trace, rejection is permanent.
+This is counter-intuitive and it is the single most important operational fact
+in this document, so here is the reasoning in full:
+
+- `SubmitBid` was called **zero** times across all five captures.
+- `ValidateBid` was called **exactly twice**, and both calls were rejected.
+- The audit log contains **exactly two** `Logs_Search_NewBid` rows reading
+  `"Error cuando presentado el lance. Problema: ..."`, in the same order.
+
+Since no submit ever happened, those rows can only have come from the failed
+validations. **CONFIRMED: validation is not free.** A rejected `ValidateBid`
+leaves a permanent record that the contracting entity can read.
+
+The design consequences are significant:
+
+- The bot **must run a local legality check before calling `ValidateBid`**, so it
+  never spends an audit-visible attempt on a bid it could have known was illegal.
+  See `fixtures/bid-validation-vectors.json` for that check.
+- The bot **must budget** validation attempts per auction and treat repeated
+  rejections as a fault worth alerting on, not as a retry loop.
+- `ValidateBid` still precedes `SubmitBid`, but for a narrower reason than
+  "validation is free": a rejected *submit* is at least as visible, and
+  validating first is the only way to learn the rule without guessing.
+
+**Not established:** whether a *successful* `ValidateBid` is also logged. We never
+produced one. The subtype `Logs_Search_NewBid` is shared, and a separate
+`Logs_Search_SubmitBidding` ("Presentar lances") exists in the vocabulary, so the
+log alone cannot distinguish validate from submit. Treat as an OPEN QUESTION.
 
 **2. The bidder's IP address is recorded on every action** (`ipAddress` field).
 The operator should know their network origin is attributable. The honest

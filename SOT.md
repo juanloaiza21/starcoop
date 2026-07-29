@@ -237,20 +237,43 @@ This is why [`docs/06-tender-discovery.md`](docs/06-tender-discovery.md) is not 
 afterthought, and why the bot's most valuable output on many auctions will be the
 decision **not to bid**.
 
-### 4.10 Every action is logged, including failures, with our IP attached
-`GET /v1/audit/GetEventLogs` returns the platform's permanent record. It contains rows
-like `"Error cuando presentado el lance. Problema: ..."` — **a bid that fails validation
-is not discarded, it is recorded**, along with `ipAddress` and `userCode`, where the
-contracting entity can read it.
+### 4.10 A failed `ValidateBid` is permanently logged — validation is NOT free
+`GET /v1/audit/GetEventLogs` returns the platform's permanent record, stamped with
+`ipAddress` and `userCode`, readable by the contracting entity.
 
-Two consequences:
+An earlier draft of this document claimed validation was free and left no trace. **That
+was wrong.** The capture proves the opposite:
 
-- A bot that sprays speculative bids publishes a log of its own malfunction on a
-  government platform under STARCOOP's name. Validation is free and leaves no trace;
-  rejection is permanent. This is the real justification for decision **D-02**.
+| Evidence | Count |
+|---|---:|
+| `SubmitBid` calls across all five captures | **0** |
+| `ValidateBid` calls, both rejected | **2** |
+| Audit rows reading `"Error cuando presentado el lance…"` | **2** |
+
+No submit ever happened, so those two rows can only have come from the two failed
+validations. **CONFIRMED: a rejected `ValidateBid` writes an entity-visible audit row.**
+
+Three consequences:
+
+- **The bot must run a local legality check *before* calling `ValidateBid`**, so it never
+  spends an audit-visible attempt on a bid it could have known was illegal. That check is
+  specified by [`fixtures/bid-validation-vectors.json`](fixtures/bid-validation-vectors.json)
+  — which is why those vectors exist, and why they matter more than they first appear.
+- **Validation attempts must be budgeted per auction.** Repeated rejections are a fault to
+  alert on, not a retry loop. A bot that sprays speculative validations publishes a log of
+  its own malfunction on a government platform under STARCOOP's name.
 - Our network origin is attributable. The bot should run from a **stable, attributable
   connection**. Rotating or anonymising IPs would serve no legitimate purpose here and
   would look evasive in precisely the record a dispute would examine.
+
+Decision **D-02** still stands, but for a narrower reason than "validation is free": a
+rejected *submit* is at least as visible, and validating first is the only way to learn
+the platform's rule without guessing.
+
+**Not established:** whether a *successful* `ValidateBid` is also logged — we never
+produced one. The subtype `Logs_Search_NewBid` is shared, and a distinct
+`Logs_Search_SubmitBidding` exists in the vocabulary, so the log alone cannot separate
+validate from submit. Tracked as an open question.
 
 The audit log is also the **reconciliation source of truth** after a dropped connection:
 it answers "what did I miss?" in a way the realtime stream cannot.
@@ -263,7 +286,8 @@ These are settled. Reopening one requires a new entry in the decision log in
 | # | Decision | Rationale |
 |---|---|---|
 | D-01 | **A floor price is mandatory and is enforced in independent layers** | The asymmetric failure mode in §4.1. No single bug may be able to defeat it. |
-| D-02 | **`ValidateBid` always precedes `SubmitBid`** | Rejected bids are written permanently to an audit trail the buyer can read (§4.10). Validation is free and silent; rejection is public and attributed. |
+| D-02 | **`ValidateBid` always precedes `SubmitBid`** | It is the only way to learn the platform's rule without guessing, and a rejected submit is at least as visible as a rejected validation (§4.10). |
+| D-14 | **A local legality check runs before every `ValidateBid`, and validation attempts are budgeted** | A failed validation is permanently logged and entity-visible (§4.10). Validation is not free, so we must not spend an attempt on a bid we could have rejected ourselves. |
 | D-03 | **Browser-assisted session bootstrap** | Login is reCAPTCHA-gated and REST likely needs cookies (§4.8). Fully headless unattended auth is not achievable or honest to promise. |
 | D-04 | **Read-only observer before any automated bid** | The `SubmitBid` contract was never captured. We learn it by watching a real auction and submitting nothing. |
 | D-05 | **Nothing hardcoded to one auction, company or lot shape** | The user's explicit requirement that it "work universally everywhere". |
