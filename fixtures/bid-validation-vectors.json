@@ -1,0 +1,286 @@
+{
+  "$schema": "starcoop/bid-validation-vectors/v1",
+  "description": "Conformance vectors for the local bid-legality check. Any implementation of the bid-arithmetic rules must produce these verdicts. Cases marked confidence GROUND_TRUTH were observed directly from the live platform and are non-negotiable; DERIVED cases follow from the confirmed rule; ASSUMED cases encode a rule we have not yet verified and MUST be revisited after the read-only observer phase (see docs/08-roadmap.md).",
+  "purpose": "The bot computes a candidate bid locally, checks it against these rules, and only then calls ValidateBid. The local check exists so the bot never wastes a round trip -- and never writes a rejected bid into the platform's permanent audit trail -- on a bid it could have known was illegal.",
+
+  "auctionUnderTest": {
+    "source": "SASI-001-2026, captured 2026-03-02",
+    "auctionTypeCode": "Reversed",
+    "auctionEvaluationTypeCode": "BestPrice",
+    "minimumBidType": "Percentage",
+    "currencyCode": "COP",
+    "roundTypeCode": "Up",
+    "decimalNum": 2,
+    "totalNum": 20,
+    "startPrice": 115670523.0,
+    "lots": [
+      {
+        "lotInternalId": "CO1.OTLN.68743791",
+        "items": [
+          {
+            "itemId": "16c20486-4219-45da-beaf-1ee35f123949",
+            "itemInternalReference": "1",
+            "itemDescription": "MEDIOS TECNOLOGICOS",
+            "itemUnit": "PS",
+            "itemQuantity": 1.0,
+            "itemInitialPrice": 115670523.0,
+            "minBidDifference": 1.0
+          }
+        ]
+      }
+    ]
+  },
+
+  "derivedConstants": {
+    "minimumStepAbsolute": 1156705.23,
+    "howDerived": "minimumBidType is Percentage and minBidDifference is 1.0, so the step is 1.0% of itemInitialPrice: 115670523.00 * 0.01 = 1156705.23. Confirmed by the platform quoting exactly '1.156.705,23 COP' in its rejection message.",
+    "criticalNote": "The step is a percentage of the INITIAL price, not of the current best bid. It is therefore a FIXED absolute amount for the entire auction. An implementation that recomputes the step against the current price will drift and produce illegal bids as the price falls."
+  },
+
+  "rules": [
+    {
+      "id": "R1",
+      "confidence": "CONFIRMED",
+      "statement": "A subsequent bid must be lower than the bidder's own previous bid by at least the minimum step: newTotal <= previousTotal - minimumStepAbsolute.",
+      "evidence": "Two live rejections with errorType BidErrMin and errorMessageLocale BidWarn_Total_MinBid_Diff_Desc.",
+      "warning": "The platform's Spanish prose says 'inferior al ultimo lance MAS la diferencia minima', which is arithmetically backwards for a descending auction. This is a translation defect in the platform. Implement the subtraction, not the prose."
+    },
+    {
+      "id": "R2",
+      "confidence": "CONFIRMED",
+      "statement": "Validation is applied independently at three scopes -- item, lot, and auction total. A bid is legal only if all three pass simultaneously.",
+      "evidence": "Three parallel error-key families exist: BidWarn_Desc (item), BidWarn_Lot_* (lot), BidWarn_Total_* (total). See docs/09-platform-vocabulary.md."
+    },
+    {
+      "id": "R3",
+      "confidence": "CONFIRMED",
+      "statement": "Values exceeding the auction's declared precision are rejected.",
+      "evidence": "BidWarn_Wrong_Decimal exists, and the auction declares decimalNum 2 and totalNum 20."
+    },
+    {
+      "id": "R4",
+      "confidence": "CONFIRMED",
+      "statement": "Bids are rejected outside the running window.",
+      "evidence": "BidWarn_Auction_Not_In_Progress exists."
+    },
+    {
+      "id": "R5",
+      "confidence": "ASSUMED",
+      "statement": "The bidder's FIRST bid must equal the base price exactly, rather than applying the minimum step.",
+      "evidence": "BidWarn_Min_Bid_Diff_Desc states: 'Si es su primero lance, este tiene que ser igual al precio base del lance.' The ascending variant is more permissive, and that asymmetry is suspicious.",
+      "consequence": "If true, the bot needs at least two round trips before reaching a competitive price, which materially changes the timing budget in a ten-minute auction.",
+      "mustVerifyBefore": "Any live bidding. Tracked in the open-questions register."
+    },
+    {
+      "id": "R6",
+      "confidence": "PROJECT_RULE",
+      "statement": "A bid below the operator-configured floor price is ALWAYS illegal, regardless of what the platform would accept.",
+      "evidence": "Not a platform rule. This is decision D-01 and is the reason the project exists in a safe form. The platform will happily accept a ruinous bid.",
+      "consequence": "This check must run last and must be impossible to bypass."
+    }
+  ],
+
+  "vectors": [
+    {
+      "id": "V-001",
+      "confidence": "GROUND_TRUTH",
+      "description": "Real rejection observed live: bidding 0 COP with no previous bid of our own.",
+      "given": {
+        "previousOwnTotal": null,
+        "candidateTotal": 0.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "BidErrMin",
+        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc"
+      },
+      "observedMinBidQuotedByPlatform": "1.156.705,23 COP"
+    },
+    {
+      "id": "V-002",
+      "confidence": "GROUND_TRUTH",
+      "description": "Real rejection observed live: bidding 1 COP.",
+      "given": {
+        "previousOwnTotal": null,
+        "candidateTotal": 1.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "BidErrMin",
+        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc"
+      },
+      "observedMinBidQuotedByPlatform": "1.156.705,23 COP"
+    },
+    {
+      "id": "V-003",
+      "confidence": "DERIVED",
+      "description": "Exactly one minimum step below the previous own bid. The boundary case: must be legal.",
+      "given": {
+        "previousOwnTotal": 115670523.0,
+        "candidateTotal": 114513817.77,
+        "floorPrice": 90000000.0
+      },
+      "expect": { "legal": true }
+    },
+    {
+      "id": "V-004",
+      "confidence": "DERIVED",
+      "description": "One centavo short of a full step. The off-by-one that a rounding bug produces: must be rejected.",
+      "given": {
+        "previousOwnTotal": 115670523.0,
+        "candidateTotal": 114513817.78,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "BidErrMin",
+        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc"
+      }
+    },
+    {
+      "id": "V-005",
+      "confidence": "DERIVED",
+      "description": "Comfortably more than one step below. Legal.",
+      "given": {
+        "previousOwnTotal": 115670523.0,
+        "candidateTotal": 110000000.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": { "legal": true }
+    },
+    {
+      "id": "V-006",
+      "confidence": "DERIVED",
+      "description": "The step does NOT shrink as the price falls. After several rounds the absolute step is still 1156705.23, computed from the INITIAL price. An implementation that computes 1% of the CURRENT price would wrongly accept 99000000 - 990000 here.",
+      "given": {
+        "previousOwnTotal": 99000000.0,
+        "candidateTotal": 98010000.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "BidErrMin",
+        "reason": "98010000 is only 990000 below the previous bid, less than the fixed step of 1156705.23."
+      }
+    },
+    {
+      "id": "V-007",
+      "confidence": "DERIVED",
+      "description": "Same starting point as V-006 but a correctly sized step. Legal.",
+      "given": {
+        "previousOwnTotal": 99000000.0,
+        "candidateTotal": 97843294.77,
+        "floorPrice": 90000000.0
+      },
+      "expect": { "legal": true }
+    },
+    {
+      "id": "V-008",
+      "confidence": "PROJECT_RULE",
+      "description": "A bid the platform would accept but that breaches our floor. The single most important vector in this file.",
+      "given": {
+        "previousOwnTotal": 91000000.0,
+        "candidateTotal": 89843294.77,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "FloorBreach",
+        "reason": "Legal under platform rules -- a full step below the previous bid -- but below the operator-configured floor. The bot must refuse."
+      }
+    },
+    {
+      "id": "V-009",
+      "confidence": "PROJECT_RULE",
+      "description": "Exactly at the floor. Permitted: the floor is the lowest acceptable bid, not an exclusive bound.",
+      "given": {
+        "previousOwnTotal": 91500000.0,
+        "candidateTotal": 90000000.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": { "legal": true }
+    },
+    {
+      "id": "V-010",
+      "confidence": "PROJECT_RULE",
+      "description": "No legal bid exists: one full step below the previous bid would breach the floor. The engine must recognise it is finished and stop, not clamp to the floor and submit an illegal bid.",
+      "given": {
+        "previousOwnTotal": 90500000.0,
+        "candidateTotal": null,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "NoLegalBidRemains",
+        "reason": "90500000 - 1156705.23 = 89343294.77, which is below the floor of 90000000. The bidder has exhausted its room and must hold."
+      }
+    },
+    {
+      "id": "V-011",
+      "confidence": "DERIVED",
+      "description": "Too many decimal places for an auction declaring decimalNum 2. Deliberately well below the previous bid so that the ONLY violation is precision -- a vector that fails for two reasons cannot tell you which rule the implementation got wrong.",
+      "given": {
+        "previousOwnTotal": 115670523.0,
+        "candidateTotal": 110000000.123456,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorMessageLocale": "BidWarn_Wrong_Decimal"
+      }
+    },
+    {
+      "id": "V-012",
+      "confidence": "DERIVED",
+      "description": "A bid above the previous own bid in a reverse auction. Always illegal.",
+      "given": {
+        "previousOwnTotal": 100000000.0,
+        "candidateTotal": 101000000.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorMessageLocale": "BidWarn_Total_Value_Desc"
+      }
+    },
+    {
+      "id": "V-013",
+      "confidence": "DERIVED",
+      "description": "Auction not running. No bid is legal regardless of value.",
+      "given": {
+        "auctionExecutionState": "NotRunning",
+        "previousOwnTotal": 100000000.0,
+        "candidateTotal": 98000000.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorMessageLocale": "BidWarn_Auction_Not_In_Progress"
+      }
+    },
+    {
+      "id": "V-014",
+      "confidence": "PROJECT_RULE",
+      "description": "Anti-chase guard. A competitor posts an obviously non-serious probe bid of 1 COP -- both real competitors did exactly this in the captured auction. The engine must not treat that as a price to beat.",
+      "given": {
+        "previousOwnTotal": 100000000.0,
+        "bestCompetitorTotal": 1.0,
+        "floorPrice": 90000000.0
+      },
+      "expect": {
+        "legal": false,
+        "errorType": "NoLegalBidRemains",
+        "reason": "Beating a 1 COP bid is impossible above the floor. The engine holds and alerts the operator rather than chasing toward zero."
+      }
+    }
+  ],
+
+  "notes": [
+    "V-001 and V-002 are the only vectors taken directly from live platform responses. Everything else is derived from the confirmed rule or encodes a project safety rule.",
+    "V-006 exists because computing the step against the current price instead of the initial price is the most likely silent correctness bug in this system. It produces bids that look right and are rejected.",
+    "V-008 through V-010 and V-014 concern the floor price. They must be enforced by the bot itself: the platform will not stop us from bidding into a loss.",
+    "R5 (first bid equals base price) is deliberately NOT encoded as a vector, because we have not verified it. Encoding an unverified rule as a passing test would manufacture false confidence."
+  ]
+}
