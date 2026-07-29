@@ -47,8 +47,12 @@ asyncio_mode = "auto"
 python_version = "3.12"
 strict = true
 warn_unreachable = true
-disallow_any_explicit = true
 files = ["src", "tests"]
+
+# Note: `disallow_any_explicit` is deliberately NOT set. It fires almost exclusively at
+# the JSON boundary, where the platform's payloads genuinely are untyped, and it caught
+# no real defect while adding noise. The hazard it was reaching for -- a float in the
+# money path -- is enforced directly instead, by tests/test_money_path_purity.py.
 
 # ---------------------------------------------------------------------------
 # Lint
