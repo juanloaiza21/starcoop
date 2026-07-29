@@ -15,12 +15,30 @@ JWT_RE = re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{1
 IPV4_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 SENSITIVE_HEADERS = {'authorization', 'cookie', 'set-cookie', 'x-xsrf-token'}
 
+# STARCOOP's own company code. Ours may appear in the clear; everyone else's is a real
+# Colombian NIT that resolves to a named company, so it gets a stable pseudonym. The
+# platform anonymises rivals deliberately and decision D-09 forbids undoing that — a
+# technical document is not a reason to accumulate a roster of who bid on what.
+OWN_COMPANY = '700961121'
+COMPANY_CODE_RE = re.compile(r'\b7\d{8}\b')
+_pseudonyms = {}
+
+
+def pseudonymise_company(code):
+    code = str(code)
+    if code == OWN_COMPANY:
+        return code
+    if code not in _pseudonyms:
+        _pseudonyms[code] = f'<COMPETITOR_{len(_pseudonyms) + 1:02d}>'
+    return _pseudonyms[code]
+
 
 def redact(s):
     if not isinstance(s, str):
         return s
     s = JWT_RE.sub('<JWT_REDACTED>', s)
-    return IPV4_RE.sub('<IP_REDACTED>', s)
+    s = IPV4_RE.sub('<IP_REDACTED>', s)
+    return COMPANY_CODE_RE.sub(lambda m: pseudonymise_company(m.group(0)), s)
 
 
 def is_noise(url):
@@ -149,7 +167,7 @@ def main():
         w('')
         scalars = {k: v for k, v in full.items() if not isinstance(v, (list, dict))}
         w('```json')
-        w(json.dumps(scalars, indent=2, ensure_ascii=False))
+        w(redact(json.dumps(scalars, indent=2, ensure_ascii=False)))
         w('```')
         w('')
         bl = full.get('biddingList') or []
@@ -158,7 +176,7 @@ def main():
             w('')
             w(f'{len(bl)} lot(s). First lot, with its items:')
             w('```json')
-            w(json.dumps(bl[0], indent=2, ensure_ascii=False)[:2600])
+            w(redact(json.dumps(bl[0], indent=2, ensure_ascii=False))[:2600])
             w('```')
             w('')
             items = bl[0].get('biddingPriceListItems') or []
@@ -182,7 +200,7 @@ def main():
             w('fields are deliberately masked by the platform:')
             w('')
             w('```json')
-            w(json.dumps(bidders[0], indent=2, ensure_ascii=False))
+            w(redact(json.dumps(bidders[0], indent=2, ensure_ascii=False)))
             w('```')
             w('')
             w('`companyName` is a generated pseudonym (`"Proveedor J"`), and `companyNIF`,')
@@ -384,7 +402,7 @@ def main():
     for (hub, meth), m in server_msgs.items():
         w(f'#### `{hub}.{meth}`')
         w('```json')
-        w(json.dumps(m.get('A'), indent=2, ensure_ascii=False)[:3000])
+        w(redact(json.dumps(m.get('A'), indent=2, ensure_ascii=False))[:3000])
         w('```')
         w('')
 

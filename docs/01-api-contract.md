@@ -164,10 +164,10 @@ Response (200):
   "originalEndDate": "2026-03-02T20:40:00Z",
   "bidders": [
     {
-      "internalId": "701399230",
+      "internalId": "<COMPETITOR_01>",
       "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio Branco",
       "languageCode": "es-CO",
-      "companyCode": "701399230",
+      "companyCode": "<COMPETITOR_01>",
       "colorCode": "#887766",
       "companyName": "Proveedor J",
       "companyNIF": "Settings_Confidential",
@@ -184,10 +184,10 @@ Response (200):
       "eauctionFinishParticipationReason": null
     },
     {
-      "internalId": "700141021",
+      "internalId": "<COMPETITOR_02>",
       "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio Branco",
       "languageCode": "es-CO",
-      "companyCode": "700141021",
+      "companyCode": "<COMPETITOR_02>",
       "colorCode": "#334455",
       "companyName": "Proveedor AO",
       "companyNIF": "Settings_Confidential",
@@ -204,10 +204,10 @@ Response (200):
       "eauctionFinishParticipationReason": null
     },
     {
-      "internalId": "700169014",
+      "internalId": "<COMPETITOR_03>",
       "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio Branco",
       "languageCode": "es-CO",
-      "companyCode": "700169014",
+      "companyCode": "<COMPETITOR_03>",
       "colorCode": "#CCFF11",
       "companyName": "Proveedor S",
       "companyNIF": "Settings_Confidential",
@@ -224,10 +224,10 @@ Response (200):
       "eauctionFinishParticipationReason": null
     },
     {
-      "internalId": "707564712",
+      "internalId": "<COMPETITOR_04>",
       "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio Branco",
       "languageCode": "es-CO",
-      "companyCode": "707564712",
+      "companyCode": "<COMPETITOR_04>",
       "colorCode": "#AABBCC",
       "companyName": "Proveedor T",
       "companyNIF": "Settings_Confidential",
@@ -244,8 +244,8 @@ Response (200):
       "eauctionFinishParticipationReason": null
     },
     {
-      "internalId": "705427516",
-      "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio
+      "internalId": "<COMPETITOR_05>",
+      
 ```
 
 ### `GET /v1//chat/GetAllMessages`
@@ -339,7 +339,7 @@ Response (200):
   {
     "internalId": "e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca",
     "auctionId": "e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca",
-    "company": "713063618",
+    "company": "<COMPETITOR_19>",
     "date": "2026-03-02T20:30:19.9779896Z",
     "totalScore": 0.0,
     "priceListScore": 0.0,
@@ -381,7 +381,7 @@ Response (200):
             "itemRanking": [
               {
                 "isMyOwnCompany": false,
-                "companyCode": "713063618",
+                "companyCode": "<COMPETITOR_19>",
                 "position": 1,
                 "value": 0.0,
                 "score": 0.0,
@@ -392,7 +392,7 @@ Response (200):
               },
               {
                 "isMyOwnCompany": false,
-                "companyCode": "700041049",
+                "companyCode": "<COMPETITOR_37>",
                 "position": 2,
                 "value": 1.0,
                 "score": 0.0,
@@ -407,7 +407,7 @@ Response (200):
         "lotRanking": [
           {
             "isMyOwnCompany": false,
-            "companyCode": "713063618",
+            "companyCode": "<COMPETITOR_19>",
             "position": 1,
             "value": 0.0,
             "score": 0.0,
@@ -418,7 +418,7 @@ Response (200):
           },
           {
             "isMyOwnCompany": false,
-            "companyCode": "700041049",
+            "companyCode": "<COMPETITOR_37>",
             "position": 2,
             "value": 1.0,
             "score": 0.0,
@@ -447,7 +447,7 @@ Response (200):
         "itemRanking": [
           {
             "isMyOwnCompany": false,
-            "companyCode": "713063618",
+            "companyCode": "<COMPETITOR_19>",
             "position": 1,
             "value": 0.0,
             "score": 0.0,
@@ -458,7 +458,7 @@ Response (200):
           },
           {
             "isMyOwnCompany": false,
-            "companyCode": "700041049",
+            "companyCode": "<COMPETITOR_37>",
             "position": 2,
             "value": 1.0,
             "score": 0.0,
@@ -473,7 +473,7 @@ Response (200):
     "globalRanking": [
       {
         "isMyOwnCompany": false,
-        "companyCode": "713063618",
+        "companyCode": "<COMPETITOR_19>",
         "position": 1,
         "value": 0.0,
         "score": 0.0,
@@ -484,10 +484,7 @@ Response (200):
       },
       {
         "isMyOwnCompany": false,
-        "companyCode": "700041049",
-        "position": 2,
-        "value": 1.0,
-   
+        "companyCode": "<COMPETITOR_
 ```
 
 ### `POST /v1//bid/ValidateBid`
@@ -776,10 +773,10 @@ fields are deliberately masked by the platform:
 
 ```json
 {
-  "internalId": "701399230",
+  "internalId": "<COMPETITOR_01>",
   "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio Branco",
   "languageCode": "es-CO",
-  "companyCode": "701399230",
+  "companyCode": "<COMPETITOR_01>",
   "colorCode": "#887766",
   "companyName": "Proveedor J",
   "companyNIF": "Settings_Confidential",
@@ -934,9 +931,9 @@ The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that `PO
 
 | Hub | Method | Example payload |
 |---|---|---|
-| `chat` | `onConnected` | `[[{"companyCode": "701399230"}, {"companyCode": "703220608"}, {"companyCode": "713376143"}, {"companyCode": "735606303"}, {"companyCode": "700870249"}, {"companyCode": "702723180"}, {"companyCode": "701174179"}, {"companyCode": "735606642"}, {"companyCode": "701179087"}, {"companyCode": "735609638"}` |
+| `chat` | `onConnected` | `[[{"companyCode": "<COMPETITOR_01>"}, {"companyCode": "<COMPETITOR_07>"}, {"companyCode": "<COMPETITOR_29>"}, {"companyCode": "<COMPETITOR_06>"}, {"companyCode": "<COMPETITOR_47>"}, {"companyCode": "<COMPETITOR_24>"}, {"companyCode": "<COMPETITOR_43>"}, {"companyCode": "<COMPETITOR_28>"}, {"companyC` |
 | `chat` | `onNewUserConnected` | `[{"id": "Starcoopcta2017", "companyCode": "700961121"}]` |
-| `chat` | `onUserDisconnected` | `[{"companyCode": "735609638"}]` |
+| `chat` | `onUserDisconnected` | `[{"companyCode": "<COMPETITOR_27>"}]` |
 | `auction` | `ReceiveClock` | `["2026-03-02T20:25:17.4058426Z"]` |
 | `auction` | `newData` | `[true, false, false]` |
 
@@ -947,82 +944,82 @@ The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that `PO
 [
   [
     {
-      "companyCode": "701399230"
+      "companyCode": "<COMPETITOR_01>"
     },
     {
-      "companyCode": "703220608"
+      "companyCode": "<COMPETITOR_07>"
     },
     {
-      "companyCode": "713376143"
+      "companyCode": "<COMPETITOR_29>"
     },
     {
-      "companyCode": "735606303"
+      "companyCode": "<COMPETITOR_06>"
     },
     {
-      "companyCode": "700870249"
+      "companyCode": "<COMPETITOR_47>"
     },
     {
-      "companyCode": "702723180"
+      "companyCode": "<COMPETITOR_24>"
     },
     {
-      "companyCode": "701174179"
+      "companyCode": "<COMPETITOR_43>"
     },
     {
-      "companyCode": "735606642"
+      "companyCode": "<COMPETITOR_28>"
     },
     {
-      "companyCode": "701179087"
+      "companyCode": "<COMPETITOR_10>"
     },
     {
-      "companyCode": "735609638"
+      "companyCode": "<COMPETITOR_27>"
     },
     {
-      "companyCode": "700980014"
+      "companyCode": "<COMPETITOR_40>"
     },
     {
-      "companyCode": "700141021"
+      "companyCode": "<COMPETITOR_02>"
     },
     {
-      "companyCode": "717886022"
+      "companyCode": "<COMPETITOR_45>"
     },
     {
-      "companyCode": "701332249"
+      "companyCode": "<COMPETITOR_11>"
     },
     {
-      "companyCode": "702375593"
+      "companyCode": "<COMPETITOR_22>"
     },
     {
-      "companyCode": "700102015"
+      "companyCode": "<COMPETITOR_44>"
     },
     {
-      "companyCode": "700944028"
+      "companyCode": "<COMPETITOR_34>"
     },
     {
-      "companyCode": "700009095"
+      "companyCode": "<COMPETITOR_12>"
     },
     {
-      "companyCode": "701458077"
+      "companyCode": "<COMPETITOR_39>"
     },
     {
-      "companyCode": "700854011"
+      "companyCode": "<COMPETITOR_15>"
     },
     {
-      "companyCode": "700016025"
+      "companyCode": "<COMPETITOR_42>"
     },
     {
-      "companyCode": "735606287"
+      "companyCode": "<COMPETITOR_31>"
     },
     {
-      "companyCode": "701016057"
+      "companyCode": "<COMPETITOR_23>"
     },
     {
-      "companyCode": "700866189"
+      "companyCode": "<COMPETITOR_26>"
     },
     {
-      "companyCode": "713063618"
+      "companyCode": "<COMPETITOR_19>"
     },
     {
-      "companyCode": "700169014"
+      "companyCode": "<COMPETITOR_03>"
     },
     {
       "companyCode": "700961121"
@@ -1045,7 +1042,7 @@ The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that `PO
 ```json
 [
   {
-    "companyCode": "735609638"
+    "companyCode": "<COMPETITOR_27>"
   }
 ]
 ```
