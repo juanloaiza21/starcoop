@@ -654,6 +654,158 @@ Response (200):
 }
 ```
 
+## 2b. The full `GetAuction` payload — READ THIS ONE, NOT `GetAuctionSimple`
+
+`GetAuctionSimple` returns opaque integer enums and **omits `minBidDifference`**.
+The full variant resolves the enums to strings and carries the price list. Every
+rule the bot depends on lives here.
+
+| Field | `GetAuctionSimple` | `GetAuction` (full) |
+|---|---|---|
+| `minimumBidType` | `1` | `"Percentage"` |
+| `auctionEvaluationTypeCode` | `"BestPrice"` | plus `auctionEvaluationTypeDescription` |
+| `minBidDifference` | *absent* | present, per price-list item |
+
+### Scalar configuration
+
+```json
+{
+  "id": "e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca",
+  "customerId": "0cbcc556-1612-444c-bcb3-0eced7b5b9c1",
+  "auctionVersionCode": "AuctionbyProposal",
+  "auctionEvaluationTypeCode": "BestPrice",
+  "auctionEvaluationTypeDescription": "Best Price (Global Value)",
+  "auctionTypeCode": "Reversed",
+  "auctionTypeDescription": "Reversed Auction",
+  "minimumBidType": "Percentage",
+  "auctionStateCode": "ReadyToStart",
+  "auctionExecutionStateCode": "Running",
+  "currencyCode": "COP",
+  "title": "SASI-001-2026 (Presentación de oferta)_Subasta electrónica",
+  "requestInformation": "SASI-001-2026",
+  "comments": null,
+  "startDate": "2026-03-02T20:30:00Z",
+  "endDate": "2026-03-02T20:40:00Z",
+  "startPrice": "115670523.000000",
+  "procedureType": "RFP",
+  "showBidderNameForOwner": true,
+  "showRanking": false,
+  "showBidderNameForOtherBidders": false,
+  "showBestBids": false,
+  "showBestBidsForAllBids": true,
+  "showBestBidsForSelfBids": false,
+  "allowBidsBellowBestBid": false,
+  "showFinalRank": false,
+  "canSupplierSeeTotalParticipants": false,
+  "timeZoneCode": null,
+  "extraTimeAutomaticAllow": true,
+  "activateExtraTimeWinner": true,
+  "extraTimePeriod": 3,
+  "extraTimeMaximumBids": null,
+  "startingExtraTimeMaximumBids": null,
+  "extraTimeManualAllow": false,
+  "extraTimeLastMinutesStartPeriod": 1,
+  "pauseAllow": false,
+  "testAuction": false,
+  "testAuctionRealValues": false,
+  "totalNum": 20,
+  "decimalNum": 2,
+  "roundTypeCode": "Up",
+  "bidderInitialBidShowBeforeStart": false,
+  "hideBidderCurrentBid": false,
+  "noValueRank": true,
+  "scoreCalcFormula": null,
+  "initialValueDifferentPerBidder": false,
+  "pauseOptions": "ExtraTimeAndComment",
+  "originalStartDate": "2026-03-02T20:30:00Z",
+  "originalEndDate": "2026-03-02T20:40:00Z",
+  "auctionSuppliersLots": null
+}
+```
+
+### Price list structure (`biddingList`) — lots and items
+
+1 lot(s). First lot, with its items:
+```json
+{
+  "internalId": "CO1.OTLN.68743791",
+  "id": "CO1.OTLN.68743791",
+  "parent": "00000000-0000-0000-0000-000000000000",
+  "displayOrder": 0,
+  "containtItems": true,
+  "lotInternalId": "ALLLOTS",
+  "lotName": "",
+  "lotDescription": "",
+  "groupReference": "",
+  "groupDescription": " ",
+  "isChapter": false,
+  "formula": null,
+  "biddingPriceListItems": [
+    {
+      "id": "16c20486-4219-45da-beaf-1ee35f123949",
+      "internalId": "CO1.BILN.1470895460",
+      "biddingListId": "CO1.OTLN.68743791",
+      "itemInternalReference": "1",
+      "itemDescription": "MEDIOS TECNOLÓGICOS",
+      "itemUnit": "PS",
+      "itemQuantity": 1.0,
+      "itemInitialUnitPrice": 115670523.0,
+      "itemInitialPrice": 115670523.0,
+      "minBidDifference": 1.0,
+      "itemQuantityStr": "1.000000",
+      "itemInitialUnitPriceStr": "115670523.000000",
+      "itemInitialPriceStr": "115670523.000000000000",
+      "minBidDifferenceStr": "1.000000",
+      "hasDecimalPlace": true,
+      "displayItemOrder": 0
+    }
+  ],
+  "biddingQuantitativeItems": []
+}
+```
+
+**CONFIRMED minimum-decrement rule.** `minimumBidType` is `"Percentage"` and `minBidDifference` is `1.0`, i.e. 1.0%. Against `itemInitialPrice` 115,670,523 that is **1,156,705.23** — exactly the `minBid` the platform quoted when it rejected a bid (`"1.156.705,23 COP"`).
+
+The step is a percentage of the **initial** price, making it a fixed absolute
+amount for the whole auction — *not* a percentage of the current best bid.
+
+### Bidder roster (`bidders`) — anonymised by design
+
+48 bidders were registered for this auction. Competitor identity
+fields are deliberately masked by the platform:
+
+```json
+{
+  "internalId": "701399230",
+  "timesZoneCode": "(UTC-05:00) Bogota, Lima, Quito, Rio Branco",
+  "languageCode": "es-CO",
+  "companyCode": "701399230",
+  "colorCode": "#887766",
+  "companyName": "Proveedor J",
+  "companyNIF": "Settings_Confidential",
+  "companyContact": "Settings_Confidential",
+  "companyEmail": "Settings_Confidential",
+  "alias": "J",
+  "linkNext": "",
+  "proposalRef": null,
+  "proposalValue": null,
+  "isOwner": false,
+  "vortalTrust": false,
+  "initialScore": 0,
+  "eauctionFinishParticipation": false,
+  "eauctionFinishParticipationReason": null
+}
+```
+
+`companyName` is a generated pseudonym (`"Proveedor J"`), and `companyNIF`,
+`companyContact` and `companyEmail` are all the sentinel `"Settings_Confidential"`.
+
+> **`companyCode`, however, is the real Colombian NIT** and is resolvable against
+> public SECOP open data. The bot is therefore *capable* of de-anonymising every
+> rival. It must not. Doing so subverts a deliberate platform privacy control and
+> moves a bidder uncomfortably close to the coordination that Colombian law
+> criminalises. Use the bidder *count* and the anonymous price signals only.
+
 ## 3. Authentication
 
 ### IMPORTANT: the capture was sanitised — REST auth headers were stripped

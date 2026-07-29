@@ -106,7 +106,37 @@ The `auction.RequestClock` / `auction.ReceiveClock` pair is the authoritative cl
 system time is irrelevant. Every deadline decision uses a round-trip-compensated offset
 against server time.
 
-### 4.5 The captures were sanitised — the JWT alone is not enough to authenticate
+### 4.5 The minimum decrement rule is CONFIRMED — 1% of the *initial* price
+`GET /v1/auction/GetAuction/{id}/{locale}` (the full variant, richer than
+`GetAuctionSimple`) returns `minimumBidType: "Percentage"` where the simple variant
+returns the integer `1`, and each price-list item carries `minBidDifference: 1.0`.
+One percent of the item's `itemInitialPrice` of 115 670 523 is **1 156 705,23** — exactly
+the `minBid` the platform quoted when it rejected our bid. The step is therefore a
+percentage of the **initial** price, a fixed absolute amount for the whole auction, not a
+percentage of the current best. This is now **CONFIRMED**, not assumed.
+
+> **Always read the full `GetAuction`, not `GetAuctionSimple`.** The simple variant
+> returns opaque integer enums and omits `minBidDifference` entirely. Every rule the bot
+> depends on lives in the full payload.
+
+### 4.6 The platform deliberately anonymises competitors — respect that
+Competitor records return `companyName: "Proveedor J"`, `alias: "J"` and
+`companyNIF`/`companyContact`/`companyEmail` all set to the sentinel
+`"Settings_Confidential"`. The platform is intentionally concealing who you are bidding
+against.
+
+However, `companyCode` **is** the real Colombian NIT, and NITs are resolvable against
+public SECOP open data. The bot is therefore technically capable of de-anonymising every
+rival in the room.
+
+**It must not.** Doing so would subvert a deliberate platform privacy control, and a
+bidder who knows exactly which rivals are present is a short step from the coordination
+that Colombian law criminalises. The bot may use the *count* of connected bidders and
+the *anonymous* price signals; it may not resolve `companyCode` to an identity. This is a
+hard rule, recorded as decision **D-09** below and expanded in
+[`docs/05-compliance.md`](docs/05-compliance.md).
+
+### 4.7 The captures were sanitised — the JWT alone is not enough to authenticate
 The HAR shows no `Cookie` or `Authorization` header on the REST calls, but byte-accounting
 proves a constant **2 528 bytes** of headers were stripped from every single request — the
 size of a VORTAL/ASP.NET session cookie jar. The JWT is only *proven* to authenticate the
@@ -132,6 +162,8 @@ These are settled. Reopening one requires a new entry in the decision log in
 | D-06 | **Secrets never enter git; the leaked token is treated as compromised** | §3. |
 | D-07 | **Polite rate limiting against a government platform** | It is a public system. Being aggressive is both wrong and the fastest route to a banned account. |
 | D-08 | **A human kill switch that works instantly** | The operator must always be able to take back control. |
+| D-09 | **Never resolve a competitor's `companyCode` to an identity** | The platform anonymises rivals on purpose (§4.6). Knowing who is in the room enables the coordination that is criminal in Colombia. |
+| D-10 | **Read auction rules from the full `GetAuction`, never `GetAuctionSimple`** | The simple variant returns opaque integer enums and omits `minBidDifference` (§4.5). |
 
 ---
 
@@ -165,8 +197,9 @@ The largest unknowns blocking implementation:
 | Open question | Why it blocks | How it gets resolved |
 |---|---|---|
 | The `SubmitBid` request/response contract | We cannot place a bid without it | Phase 2 read-only observer on a live auction |
-| `minimumBidType` semantics | Determines legal bid arithmetic | Observe auctions with differing configurations |
-| Exact REST authentication (§4.5) | Determines the session model | Fresh unsanitised capture |
+| Whether the **first bid must equal the base price** | Costs an extra round trip before reaching a competitive price, changing the timing budget | Observation; the platform's own error string asserts it (see [`docs/09-platform-vocabulary.md`](docs/09-platform-vocabulary.md)) |
+| The other `minimumBidType` values | We have confirmed `Percentage` only; `Value`/`None` presumably exist | Observe auctions with differing configurations |
+| Exact REST authentication (§4.7) | Determines the session model | Fresh unsanitised capture |
 | Whether extra time triggers on any bid or only a winner-changing bid | Changes end-game strategy | Observation |
 | Platform ToS position on automation | Determines whether we proceed at all | [`docs/05-compliance.md`](docs/05-compliance.md) |
 

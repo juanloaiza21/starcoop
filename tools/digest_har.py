@@ -119,6 +119,78 @@ def main():
             w('```')
             w('')
 
+    # ---- 2b. The full GetAuction payload — the authoritative rule source.
+    full = None
+    for e in entries:
+        if '/auction/GetAuction/' in e['request']['url']:
+            try:
+                full = json.loads(e['response']['content']['text'])
+            except Exception:
+                pass
+            break
+    if full:
+        w('## 2b. The full `GetAuction` payload — READ THIS ONE, NOT `GetAuctionSimple`')
+        w('')
+        w('`GetAuctionSimple` returns opaque integer enums and **omits `minBidDifference`**.')
+        w('The full variant resolves the enums to strings and carries the price list. Every')
+        w('rule the bot depends on lives here.')
+        w('')
+        w('| Field | `GetAuctionSimple` | `GetAuction` (full) |')
+        w('|---|---|---|')
+        w('| `minimumBidType` | `1` | `"Percentage"` |')
+        w('| `auctionEvaluationTypeCode` | `"BestPrice"` | plus `auctionEvaluationTypeDescription` |')
+        w('| `minBidDifference` | *absent* | present, per price-list item |')
+        w('')
+        w('### Scalar configuration')
+        w('')
+        scalars = {k: v for k, v in full.items() if not isinstance(v, (list, dict))}
+        w('```json')
+        w(json.dumps(scalars, indent=2, ensure_ascii=False))
+        w('```')
+        w('')
+        bl = full.get('biddingList') or []
+        if bl:
+            w('### Price list structure (`biddingList`) — lots and items')
+            w('')
+            w(f'{len(bl)} lot(s). First lot, with its items:')
+            w('```json')
+            w(json.dumps(bl[0], indent=2, ensure_ascii=False)[:2600])
+            w('```')
+            w('')
+            items = bl[0].get('biddingPriceListItems') or []
+            if items and 'minBidDifference' in items[0]:
+                mbd = items[0]['minBidDifference']
+                base = items[0].get('itemInitialPrice')
+                w(f'**CONFIRMED minimum-decrement rule.** `minimumBidType` is '
+                  f'`"{full.get("minimumBidType")}"` and `minBidDifference` is `{mbd}`, i.e. '
+                  f'{mbd}%. Against `itemInitialPrice` {base:,.0f} that is '
+                  f'**{base * mbd / 100:,.2f}** — exactly the `minBid` the platform quoted when '
+                  f'it rejected a bid (`"1.156.705,23 COP"`).')
+                w('')
+                w('The step is a percentage of the **initial** price, making it a fixed absolute')
+                w('amount for the whole auction — *not* a percentage of the current best bid.')
+                w('')
+        bidders = full.get('bidders') or []
+        if bidders:
+            w('### Bidder roster (`bidders`) — anonymised by design')
+            w('')
+            w(f'{len(bidders)} bidders were registered for this auction. Competitor identity')
+            w('fields are deliberately masked by the platform:')
+            w('')
+            w('```json')
+            w(json.dumps(bidders[0], indent=2, ensure_ascii=False))
+            w('```')
+            w('')
+            w('`companyName` is a generated pseudonym (`"Proveedor J"`), and `companyNIF`,')
+            w('`companyContact` and `companyEmail` are all the sentinel `"Settings_Confidential"`.')
+            w('')
+            w('> **`companyCode`, however, is the real Colombian NIT** and is resolvable against')
+            w('> public SECOP open data. The bot is therefore *capable* of de-anonymising every')
+            w('> rival. It must not. Doing so subverts a deliberate platform privacy control and')
+            w('> moves a bidder uncomfortably close to the coordination that Colombian law')
+            w('> criminalises. Use the bidder *count* and the anonymous price signals only.')
+            w('')
+
     # ---- 3. Auth headers
     w('## 3. Authentication')
     w('')
