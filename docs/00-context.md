@@ -11,10 +11,13 @@
 | Attribute | Value |
 |---|---|
 | Legal name | COOPERATIVA DE VIGILANTES STARCOOP CTA. |
-| NIT / SECOP company code | `700961121` |
+| NIT (tax ID) | `830101476` (CONFIRMED from SECOP open data, [Tender Discovery §4.3](06-tender-discovery.md)) |
+| SECOP II / Vortal supplier code (`companyCode`) | `700961121` — **not the NIT**; a platform-assigned identifier (matches the `LoggedInCompanyCode` JWT claim and open data's `codigo_proveedor`) |
 | SECOP II username | `Starcoopcta2017` |
 | Sector regulator | Superintendencia de Vigilancia y Seguridad Privada (*Supervigilancia*) |
 | Primary customer base | Colombian public entities (municipalities, institutes, agencies) |
+
+> **`companyCode` ≠ NIT.** Live open data ([Tender Discovery §4.3](06-tender-discovery.md)) shows STARCOOP's `codigo_proveedor` is `700961121` while its NIT is `830101476` — two different numbers. The `companyCode`/`userCode` the platform logs is therefore the **Vortal/SECOP supplier code**, not the tax ID. A supplier code is still resolvable to a named company through public datasets (`hgi6-6wh3`, `qmzu-gj57`), so the anonymity rules built on it (decision D-09, guardrail G-08 in [Compliance](05-compliance.md) / [Architecture](07-architecture.md)) still stand — but for that reason, not because the code "is the NIT".
 
 Two facts about this client shape everything downstream:
 
@@ -103,7 +106,7 @@ The screen recording and event logs of a real auction show that the decisive fai
 | The local clock lies | Operator's PC was **+13.15 s** off the auction server's clock | A human (or naive bot) using local time misjudges the final minute entirely |
 | The read API goes backwards | `GetAuctionSimple` served `Started → ReadyToStart → Started` during a live auction | State handling needs regression guards; a single read is never trusted |
 | Rivals post probe bids | Lances of **1,00 COP** and **0,00 COP** appeared in the capture | A naive "beat the best visible bid" strategy would chase nonsense below its own floor |
-| Humans fumble validation under pressure | Both human `ValidateBid` attempts in the recording failed — and each failure is permanently written to the entity's audit log with our NIT and IP | Validation attempts are a budgeted, audited resource, not a free query |
+| Humans fumble validation under pressure | Both human `ValidateBid` attempts in the recording failed — and each failure is permanently written to the entity's audit log with our supplier code (`companyCode`, not the NIT — see §1) and IP | Validation attempts are a budgeted, audited resource, not a free query |
 
 These observations are the project's founding argument: **availability, discipline, and floor-obedience win; speed does not** ([Architecture §1](07-architecture.md)).
 
@@ -169,7 +172,7 @@ The decided solution — codename **`centinela`** — is specified in [Architect
 
 | # | Goal | Where specified |
 |---|---|---|
-| G1 | **Universal**: works for any SECOP II auction — any `auctionId`, any lot/item shape, any decrement rule, any entity. Nothing hardcoded to SASI-001-2026 or company 700961121 | [Architecture](07-architecture.md) |
+| G1 | **Universal**: works for any SECOP II auction — any `auctionId`, any lot/item shape, any decrement rule, any entity. Nothing hardcoded to SASI-001-2026 or supplier code 700961121 | [Architecture](07-architecture.md) |
 | G2 | **Never bid below the floor** — enforced in multiple independent layers, with a latched kill on violation | [Architecture §6](07-architecture.md), [Strategy Engine](04-strategy-engine.md) |
 | G3 | **Survive the platform**: reconnect, reconcile, and keep a disciplined server-clock estimate through disconnects, backwards reads, and 10-second latency tails | [Client Protocol](03-client-protocol.md) |
 | G4 | **Validate before submitting, always** — and never blind-retry an ambiguous submit | [Architecture §4.6](07-architecture.md) |
@@ -208,7 +211,7 @@ Every KPI below is computable from data the system already records: the hash-cha
 
 | KPI | Definition | Source | Target |
 |---|---|---|---|
-| **Win rate** | Auctions won ÷ auctions entered *armed* (co-pilot-only auctions tracked separately). Compare against the pre-bot human baseline | Audit log + award records | Beat the human baseline; trend up quarter over quarter |
+| **Win rate** | Auctions won ÷ auctions entered *armed* (co-pilot-only auctions tracked separately). Compare against the pre-bot human baseline | Audit log `OUTCOME`/`AWARD` records ([07 §5.8](07-architecture.md): close reconciliation + the cold-path award watch over post-award open data) | Beat the human baseline; trend up quarter over quarter |
 | **Margin retained vs floor** | For won auctions: `(P_final − P_floor) ÷ (P_start − P_floor)` — of the room between start price and our floor, the fraction we did **not** give away. A win exactly at floor scores 0% | Audit log (floor sheet SHA + final lance) + `GetSupplierBids` | Maximize subject to winning; review any win at <5% for whether we should have entered at all |
 | **Auction selection quality** | Of auctions discovery ranked and humans entered, the share that were winnable at ≥ floor + threshold (in hindsight, from final prices) | Discovery records + public award data | Improves the denominator of win rate; "do not enter" calls are counted as successes when the final price closed below our floor |
 
@@ -218,7 +221,7 @@ Every KPI below is computable from data the system already records: the hash-cha
 |---|---|---|---|
 | **Bids landed within deadline** | Server-confirmed lances ÷ strategy `BID` decisions while armed. Complement: every `SKIP_NO_TIME` and every decision-to-confirmation over budget is an incident record | Audit log correlated with `GetEventLogs` | ≥ 99% per auction; any missed intended bid in the final scheduled minute or an extension = post-mortem |
 | **Bid early-margin** | Seconds between server confirmation of our lance and the then-current `endDate` (design intent: land at T−45 s, never inside the extension-trigger minute unless deliberate) | Audit log + disciplined server clock | p50 ≥ 40 s; p100 > 10 s |
-| **Connection uptime (state freshness)** | % of armed auction wall-time in which the newest reconciled state snapshot is within the phase's freshness bound (ARMED ≤ 10 s, ENDGAME ≤ 2.5 s). SignalR leg uptime tracked separately as a secondary metric — the REST leg alone must carry the auction | Snapshot version log | ≥ 99.5% per auction; **no freshness gap > 10 s while armed**; contrast with the field's observed ~80% drop rate |
+| **Connection uptime (state freshness)** | % of armed auction wall-time in which the newest reconciled state snapshot is within the phase's freshness bound — the same bounds the tradeable gate enforces: **ARMED ≤ 5 s, ENDGAME ≤ 2.5 s** (single source of truth: the constants table in [Client Protocol §9](03-client-protocol.md); restated in [02 §2.4](02-auction-mechanics.md), [04 §6.7](04-strategy-engine.md), [07 §5.2](07-architecture.md)). SignalR leg uptime tracked separately as a secondary metric — the REST leg alone must carry the auction | Snapshot version log | ≥ 99.5% per auction; **no freshness gap > 10 s while armed** (an absolute excursion ceiling on top of the 5 s bound); contrast with the field's observed ~80% drop rate |
 | **Reconciliation correctness** | After every reconnect/restart: mismatches between our believed "my last lance / endDate" and the server's view | `RECONCILE` audit records | 100% converged before any new decision; zero decisions taken on stale state |
 | **Clock discipline** | ε (half-width of the server-clock estimate) while armed; % of armed time in the "bidding blocked: clock unreliable" gate | Clock samples DB | ε ≤ 0.5 s p95; blocked-time < 1% per auction |
 | **Auctions missed due to technical failure** | Count of auctions where STARCOOP intended to bid and could not, for any technical reason attributable to us: session expiry, dead runner, wedged browser, blocked IP, canary failure at ARM | Incident log (every occurrence is one) | **Zero per quarter.** This is the headline reliability number — it is the exact failure mode the bot was built to eliminate |
@@ -227,7 +230,7 @@ Every KPI below is computable from data the system already records: the hash-cha
 
 | KPI | Definition | Source | Target |
 |---|---|---|---|
-| **ValidateBid rejections** | Server-rejected validations per auction — each is permanently visible to the procuring entity with our NIT and IP | `GetEventLogs` + audit log | ≤ 2 per auction (hard budget); 0 in steady state |
+| **ValidateBid rejections** | Server-rejected validations per auction — each is permanently visible to the procuring entity with our supplier code (`companyCode`) and IP | `GetEventLogs` + audit log | ≤ 2 per auction (hard budget); 0 in steady state |
 | **Politeness budget adherence** | Request rate vs. the configured per-host budget; any WAF/429/5xx-burst event | Request stats DB | 100% adherence; zero WAF blocks (a blocked IP is legally a withdrawal — see [Compliance](05-compliance.md)) |
 | **Audit chain integrity** | Verification of the hash chain across every armed auction, end to end | `centinela replay` | 100%, verified after every auction |
 
@@ -263,7 +266,8 @@ Every KPI below is computable from data the system already records: the hash-cha
 | SASI | *Selección Abreviada por Subasta Inversa* — the abbreviated-selection-by-reverse-auction procedure (and the tender-numbering prefix) |
 | PAA | *Plan Anual de Adquisiciones* — an entity's published annual procurement plan (a discovery input) |
 | CTA | *Cooperativa de trabajo asociado* — associated-work cooperative, STARCOOP's legal form |
-| NIT | Colombian tax ID; doubles as the company code on SECOP II (STARCOOP: `700961121`) |
+| NIT | Colombian tax ID (STARCOOP: `830101476`). **Not** the SECOP II company code — see next row |
+| `companyCode` / supplier code | Platform-assigned Vortal/SECOP supplier identifier (STARCOOP: `700961121`; open data's `codigo_proveedor`). Distinct from the NIT, but still resolvable to a named company via public datasets — hence decision D-09 forbids resolving rivals' codes |
 | Supervigilancia | Superintendencia de Vigilancia y Seguridad Privada — sector regulator that sets the statutory minimum tariffs |
 | COP | Colombian peso. es-CO formatting: `115.670.523,00` — dots for thousands, comma for decimals |
 | HAR | HTTP Archive — a browser's recorded network traffic; the raw material of our API contract |

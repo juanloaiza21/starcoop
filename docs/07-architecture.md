@@ -191,6 +191,8 @@ Rules: the token is sniffed from the `token=` query param of the first `/signalr
 
 Exclusive lockfile on `(auctionId, companyCode)`. Contains the REST leg, SignalR leg, ServerClock, decision loop, watchdog, gateway, and panel server. Fully specified in §5.
 
+**Account-level lock (required by [05 G-06](05-compliance.md)).** The per-auction lockfile alone would permit N runners for N overlapping auctions on one credential — N concurrent sessions on a `personal e intransferible` user (ToS §IV.1.j). The runner therefore also takes an **exclusive account-level lock keyed on `companyCode` alone** before entering any authenticated mode, and refuses to start while another runner holds it. Consequence, accepted deliberately: **two STARCOOP auctions on the same day means choosing one** — the collision is detected at planning time (the discovery calendar and the 05 §10.2 pre-flight both check it), never discovered on auction morning. Concurrent auctions on one credential stay out of scope until the platform's session semantics are observed (OQ-08).
+
 ### 4.4 `strategy/` — pure decision core
 
 The strategy library itself (min_step, patient_endgame, adaptive, bracket, shadow — composition and selection) is specified in [04-strategy-engine.md](04-strategy-engine.md); this section fixes the *architectural* contract.
@@ -216,6 +218,8 @@ class Strategy(Protocol):
 Determinism is load-bearing: it makes replay tests exact and makes any operator-side "what would it do" preview trustworthy. Built-ins: `minimal_step` (default: while `my_rank > 1` and a legal bid ≥ floor exists, propose the smallest legal improvement; at floor, `STOP` + alarm), `shadow` (always HOLD). Hard invariants (property-tested, §10): never emits `BID` when `my_rank == 1`; never emits a total < floor — and the latter is *unrepresentable*, see §6 layer L2. The authoritative field-by-field `AuctionView` contract is in [04-strategy-engine.md](04-strategy-engine.md).
 
 **Probe-bid defense** *(grafted from pragmatic)*: rivals posted 1,00 and 0,00 COP placeholder bids in the capture. A bid is **serious** only if `bid ≥ max(floor_legal_estimate, max_undercut_pct × start_price)`; non-serious bids are excluded from `my_rank` and `best_serious_visible`, so the bot never chases a nonsense number below its own floor. This closes the gap the judges found in the bare `rank == 1` invariant.
+
+**Multi-scope auctions (per-lot / per-item).** The view above projects **one biddable scope** ([02 §6.3](02-auction-mechanics.md)): the synthetic `ALLLOTS` lot in `AuctionbyProposal` (the observed mode), one lot in `AuctionByLot`, one item in `AuctionByItem`. In multi-scope auctions the app layer builds one per-scope view per epoch with fully independent per-scope state (ref, δ, rank, floor, bracket budgets), dispatches at most one submit cycle at a time through the single non-reentrant gateway in deterministic order, and shares the per-auction ValidateBid budget across scopes — the full contract is [04 §3.5](04-strategy-engine.md) RULES MS-1…MS-6. Because per-scope independence is ASSUMED-not-observed, **multi-scope auctions are capped at `copilot` until OQ-29 resolves** (fail closed; see also 02 RULE V-3).
 
 ### 4.5 `guard/` — floor enforcement package
 
@@ -313,7 +317,7 @@ Confirmed: the operator's PC was +13.15 s off, stable ±0.05 s ([02-auction-mech
 
 ### 5.4 The two state legs and reconciliation
 
-**REST leg — always on, can win alone.** Cadence by phase: IDLE 60 s · ARMED 10 s · ENDGAME 2.5 s · after `newData` an immediate single-flight refetch with 300 ms debounce. Fetches `GetAuction` (full, for `endDate`/δ/state — never `GetAuctionSimple`, decision D-10) and `GetSupplierBids` (leaderboard; paginate until empty per O12). All cadences draw from the global politeness budget (§7.1).
+**REST leg — always on, can win alone.** Cadence by phase: IDLE 60 s · ARMED 10 s · ENDGAME 2.5 s · after `newData` an immediate single-flight refetch with 300 ms debounce. Fetches `GetAuction` (full) and `GetSupplierBids` (leaderboard; paginate until empty per O12). Decision D-10, precisely scoped: the **ruleset** — δ (`minBidDifference`), `minimumBidType`, the price list — and the decision-driving `endDate`/state snapshot are read only from the full `GetAuction`, never derived from `GetAuctionSimple`, which returns opaque integer enums and omits `minBidDifference`. `GetAuctionSimple` is not banned outright: it remains the endpoint for the startup three-strategy auth self-test ("the cheapest read", [03-client-protocol.md](03-client-protocol.md) §2.5) and for cheap liveness/state checks (03 §3.1) — legitimate uses that never feed the δ model. All cadences draw from the global politeness budget (§7.1).
 
 **SignalR leg — best effort.** Hand-rolled longPolling: negotiate → connect → start → poll (125 s read timeout) → send → abort. Exactly one poll in flight; cursor `C` persisted **before** dispatching contained `M` messages; groups token `G` persisted; idempotent handlers. `T:1` → `/reconnect` (50 s window); `D:1` → full restart. Budget: ≤ 1 full restart per 20 s, ≤ 6 per auction; past budget the leg parks itself DOWN and the REST leg's ENDGAME cadence carries the auction. `newData` (fires 60–130 ms after each rival bid — confirmed) is the low-latency edge; its arrival timestamp is also a rival-activity clock. Clean shutdown always issues `POST /signalr/abort` (a clean `MessengerLogout` in the entity's log). Full wire specification: [03-client-protocol.md](03-client-protocol.md).
 
@@ -342,7 +346,7 @@ while phase is not CLOSED and not kill.tripped():
     # d.kind is BID
     bid = guard.clamp(d.bid, floors)               # L1: clamp; None if the clamped bid no longer improves
     if bid is None: continue
-    if clock.now_latest() >= state.end_at - ABORT_MARGIN:          # §5.6: never start a cycle past abort_after
+    if clock.now_latest() >= state.end_at - abort_margin_effective():   # §5.6: live-derived, floor 15 s — never start a cycle past abort_after
         notify("SKIP_NO_TIME"); continue
     outcome = await gateway.run(bid)               # §4.6: audit → validate → L3 → submit (non-reentrant)
     await reconcile(outcome)                       # §5.4(d): adopt the server's view before deciding again
@@ -368,18 +372,34 @@ T_submit_deadline = endDate
                   − safety_margin             # ≥ 5 s
 ```
 
+The budget sums to `6 + 6 + 2 + 5 = 19 s`, rounded up to a 20 s working margin — exactly the conclusion of [02-auction-mechanics.md](02-auction-mechanics.md) §3.1: "stop initiating new bid cycles ≈ 20 s before endDate; **15 s is a hard cutoff**." The abort margin therefore defaults to 20 s and may never be configured below the 15 s hard cutoff; an 8 s value (an earlier draft of this table) would let the loop legally start a cycle whose own p99 budget needs ~12–14 s — the exact after-close landing the parameter exists to prevent — and would make the [00-context.md](00-context.md) §7.3 KPI ("Bid early-margin p100 > 10 s") unachievable. This table is the authority; [04-strategy-engine.md](04-strategy-engine.md) §7.3 mirrors it.
+
 | Parameter | Default | Rationale |
 |---|---|---|
 | `fire_at` | `end_at − 45 s` | inside the closing window W = 60 s, so the lance both scores and extends; 45 s absorbs the platform's own p90 ≈ 6.9 s REST latency plus a failed validate + one retry |
-| `revalidate_by` | `end_at − 20 s` | if `ValidateBid` has not returned by here, escalate the driver rung and alarm |
-| `abort_after` | `end_at − 8 s` | past this point a new submit cycle is not started: emit `SKIP_NO_TIME` + alarm instead of risking a lance that lands after close; an in-flight submit is never cancelled — its outcome is reconciled |
+| `revalidate_by` | `end_at − 30 s` | if `ValidateBid` has not returned by here, escalate the driver rung and alarm — it must lead `abort_after` by enough time (≥ 10 s) for one escalated attempt to start before the cutoff |
+| `abort_after` | `end_at − abort_margin_s`; `abort_margin_s` default **20 s**, hard floor **15 s** | derived from the budget above (6 + 6 + 2 + 5 = 19 s ≈ 20 s; 02 §3.1). Past this point a new submit cycle is not started: emit `SKIP_NO_TIME` + alarm instead of risking a lance that lands after close; an in-flight submit is never cancelled — its outcome is reconciled |
 | ENDGAME snapshot freshness | ≤ 2.5 s | stale state must not drive an endgame lance |
 
-The gateway additionally maintains a **live latency budget** — a running estimate of the current validate+submit round trip (SQLite latency stats, §2) — and commits the final bid while at least the p90 of that budget remains (decision D-11). `SKIP_NO_TIME` is loud by design: it means our margins were consumed and a human should be watching the TOMAR CONTROL button. Strategy-level rationale (why T−45 s, why never snipe): [04-strategy-engine.md](04-strategy-engine.md) §7.
+The gateway additionally maintains a **live latency budget** — a running estimate of the current validate+submit round trip (SQLite latency stats, §2) — and commits the final bid while at least the p90 of that budget remains (decision D-11). The effective abort margin is **re-derived from that live budget** rather than trusted as a constant: `abort_margin_effective = max(live_p99(ValidateBid) + live_p99(SubmitBid) + clock_uncertainty + safety_margin, abort_margin_s, 15 s)` — the configured value and the 15 s hard cutoff are floors, and a platform having a slow day widens the margin automatically. `SKIP_NO_TIME` is loud by design: it means our margins were consumed and a human should be watching the TOMAR CONTROL button. Strategy-level rationale (why T−45 s, why never snipe): [04-strategy-engine.md](04-strategy-engine.md) §7.
 
 ### 5.7 Crash recovery and restart semantics
 
 On start, the runner: (1) takes the exclusive lockfile on `(auctionId, companyCode)` or refuses to run; (2) replays the hash-chained audit journal (§4.7) and verifies the chain; (3) invalidates any outstanding `ValidatedBid` (TTL is 5 s; a restart always exceeds it); (4) restores the kill latch if it was tripped — a kill survives restart; (5) runs the full reconciliation of §5.4 against `GetAuction` + `GetSupplierBids` + `GetEventLogs`; (6) starts in the mode recorded before the crash **capped at `copilot`** — re-entering `assisted`/`armed` always requires a fresh typed confirmation. The server's record, not our intent, is the ground truth for what happened while we were down.
+
+### 5.8 Auction close, outcome, and the award handoff
+
+Nothing above says how the system learns it won or lost. This section does.
+
+**Close detection.** `Finished` is latched only per 02 RULES B-2/B-4: a `Logs_Search_AuctionFinished` row in `GetEventLogs` is the authority; a REST state read alone may flap, and `endDate` passing on our clock is never sufficient (extensions mutate it). Once latched, `Finished` is absorbing (RULE B-3).
+
+**CLOSE_RECONCILE — mandatory, once, immediately after the latch.** A final reconciliation pass: full `GetAuction`, `GetSupplierBids` paginated to empty, `GetEventLogs` read in full. It writes a terminal `OUTCOME` record to the audit chain containing: the server's view of our final standing lance (this — not our last emitted decision — **proves our standing lance**; any nonzero diff against our believed state is an incident, not a footnote), final `my_rank_raw` and `my_rank_serious`, best raw/serious values, observed extension count, our ValidateBid rejection count, and the audit-chain head hash. The vocabulary's close-time fields (`showFinalRank`, `Sidebar_Won`, `auctionFinisheds`) are CONFIRMED as strings only — the capture never reached a clean close, so their runtime shapes are **ASSUMED**; CLOSE_RECONCILE records whatever the platform serves, and the outcome classification below does not depend on them.
+
+**Outcome classification — provisional by law.** Rank 1 at close is *not* a win: the auction result is an input to the entity's adjudication act, and an artificially-low winner can still be rejected (D.1082 art. 2.2.1.1.2.2.4, [05 §5](05-compliance.md)). `OUTCOME` therefore records one of: `PROVISIONAL_WIN` (raw rank 1), `PROVISIONAL_LOSS`, `LOST_TO_SUSPECT_PRICE` (the standing winner is below the sanity floor — the prepared [05 §5](05-compliance.md) challenge route, our floor sheet doubling as the sustainability argument), or `CLOSED_UNKNOWN` (rank unavailable; alarm).
+
+**Award watch — the cold path closes the loop.** Every outcome stays `PENDING_AWARD` until the adjudication appears in post-award open data (Socrata, [06 §3](06-tender-discovery.md); 1–2 day lag) or the process page. `centinela scan --awards` — the discovery module, cold path, never the runner — polls open data for the process id and writes a final `AWARD` record (`WON | LOST | DESERTED | REVOKED`) referencing the `OUTCOME` record. **These `AWARD` rows, joined with public award data, are the "award records" that feed [00 §7.2](00-context.md)'s win-rate and selection-quality KPIs** — the KPI never trusts the bot's opinion of itself.
+
+**Handoff and shutdown.** On `WON`, the post-auction report (SC-065) plus the sealed audit bundle and floor sheet are the handoff artifacts to contract execution (out of scope, 00 §6.2) and the ready-made answer to any artificially-low-offer inquiry. After `OUTCOME`: the audit chain is sealed and verified, the per-auction HMAC salt is destroyed ([05 §6.4](05-compliance.md)), the runner parks CLOSED and exits. Award watching belongs to the cold path; a runner never outlives its auction.
 
 ---
 
@@ -421,6 +441,20 @@ One global token bucket governs all traffic to `*.secop.gov.co`: **capacity 10, 
 ### 7.3 Evidence posture
 
 The hash-chained audit log (§4.7), the politeness telemetry, the floor sheets with their signatures, and the mode-ladder confirmations together form the dispute package: proof that the automation was polite, authorized, self-account, floor-bounded, and human-supervised ([05-compliance.md](05-compliance.md) §12). Rival identities are never resolved (`companyCode` → NIT lookups are prohibited, decision D-09) and are HMAC-pseudonymised in our own records.
+
+### 7.4 Threat model — the bot's own control plane
+
+The floor layers defend against our own bugs. This section defends against an adversary who attacks the **controls**. Assets ranked by prize: (1) the authenticated SECOP session in the browser process — legally STARCOOP's signature — exported via noVNC; (2) the VPS; (3) the panel (ARM capability); (4) the Telegram channel; (5) the kill-file / OS signal.
+
+| Channel | Compromise gives | Worst credible outcome | Mitigations | Residual |
+|---|---|---|---|---|
+| **noVNC** (live authenticated session) | Full manual control of the SECOP account: place lances, *Finalizar Participación*, read everything | An adversary bids as STARCOOP, or locks us out of an auction irreversibly | Binds to localhost only; reachable **exclusively** over WireGuard; never exposed publicly (deploy checklist assertion); browser process has no public listener | Any WireGuard peer reaches the session ⇒ **peer devices are credential-equivalent** (row below) |
+| **Panel over WireGuard** | ARM/DISARM, mode changes, kill | Attacker can *arm* (typed confirmation is knowledge, not cryptography) — but cannot lower a floor (no runtime mutation API, L0) nor exceed the Bracket envelope; can disarm/kill = lose one auction | Per-device WireGuard keys, peer allowlist; device loss ⇒ revoke peer same day (runbook); panel stores no credential material | A compromised operator laptop/phone is full operator capability; treat those devices under the same discipline as the credential itself |
+| **Telegram `/kill`** (shared secret) | Exactly one verb: kill | Denial of one auction — the deliberate asymmetry of DL-14 working as designed | **Secret hygiene (this is the documentation SC-064 requires):** ≥ 32 random bytes, injected via `CENTINELA_TG_SECRET`, **rotated before every armed auction**, after any suspected exposure, and on any personnel change; rotation = new secret + runner restart, recorded in the audit chain. Outbound alerts traverse third-party infrastructure: they carry rank/bid events (entity-visible anyway) and **never floors, strategy parameters, or secrets** | A spoofed kill at the decisive moment loses an auction; accepted — the inverse asymmetry (a spoofed *bid*) is the outcome the design refuses to permit |
+| **Kill-file / OS signal** | Kill only | Same as above | Requires a shell on the VPS (next row) | — |
+| **VPS root** | Everything: keychain secrets, browser session, audit files | **Defeats every software layer** — an attacker with root can bid, and no local control can stop them. Stated plainly rather than hidden | SSH keys only, no password auth, minimal services, automatic security updates, provider disk encryption where available; *detection*: `centinela replay` chain verification (tampering breaks the hash chain) and the entity-side log (every action stamped with our IP); *containment*: **rotate the SECOP password (IR-4) — the one control root cannot veto** | Root compromise is a full incident (IR-4 + IR-5 posture); the design goal is detection and fast platform-side revocation, not the pretense of local defense |
+
+Two invariants restated as the summary: **every remote channel except the WireGuard panel can only make the bot less active; and no channel — including the panel — can weaken a floor.** The §11 kill drill gains a compromise variant (revoke a WireGuard peer + rotate the Telegram secret, timed), practiced with the same seriousness as the kill itself.
 
 ---
 
@@ -486,7 +520,7 @@ floors_file: "floors/<auctionId>.signed.yaml"   # L0 artifact — SHA-256 + seco
 strategy:
   composition: bracket            # bracket ⊃ adaptive(patient_endgame) | min_step | shadow
   bracket: { max_steps: 12, max_total_decrement_cop: "8_000_000.00" }
-  timing:  { fire_margin_s: 45, revalidate_margin_s: 20, abort_margin_s: 8 }   # §5.6 defaults
+  timing:  { fire_margin_s: 45, revalidate_margin_s: 30, abort_margin_s: 20 }  # §5.6 defaults; abort_margin_s < 15 is refused at load (02 §3.1 hard cutoff)
   serious: { max_undercut_pct: 0.50 }           # probe-bid filter sanity floor (§4.4)
   jumps:   { enabled: false, j_max_steps: 3, g_threshold: 0.15 }
   adaptive: { prior_sigma: 0.25 }
@@ -545,7 +579,7 @@ CI never touches `*.secop.gov.co` (principle 10). The test estate, bottom-up:
 - **Host clock:** ordinary NTP is fine — the runner never trusts it for auction deadlines (§5.3); it matters only for TLS validity and log timestamps.
 - **Cold standby (manual, deliberate):** a second machine may hold the image and config. Promotion is a human runbook step — never automatic — and starts with §5.4's reconciliation; the `(auctionId, companyCode)` lockfile plus the mode cap on restart (§5.7) make accidental dual-running inert.
 - **Runbooks (Spanish, in `deploy/runbooks/es/`):** auction-day checklist (T−4 h bootstrap so the 24 h token covers the auction plus extensions; T−30 min readiness check with Telegram confirmation; ARM with typed confirmation; ENDGAME watch posture with TOMAR CONTROL ready; post-auction reconciliation and audit-chain export), the kill drill (practiced, timed), the WAF-block response ([05-compliance.md](05-compliance.md) §11), and the standby promotion procedure.
-- **Retention:** audit chains and floor sheets are retained per [05-compliance.md](05-compliance.md); latency/clock SQLite databases are working data, rotated freely.
+- **Retention:** per [05-compliance.md](05-compliance.md) §6.4 — sealed audit bundles leave the VPS within 30 days for STARCOOP-controlled encrypted storage; floor sheets, actas, ARM records and bundles are deletion-frozen until counsel fixes the statutory retention periods; latency/clock SQLite databases are working data, rotated at 90 days.
 - **Before first live run:** rotate the SECOP II account password ([SOT](../SOT.md) §3 — the evidence bundle leaked live credentials).
 
 ---

@@ -8,7 +8,7 @@ repository, this document wins — or this document is wrong and must be fixed.*
 |---|---|
 | **Project** | Automated bidding agent for SECOP II electronic reverse auctions |
 | **Owner** | Juan Loaiza |
-| **Beneficiary** | COOPERATIVA DE VIGILANTES STARCOOP CTA. (company code `700961121`) |
+| **Beneficiary** | COOPERATIVA DE VIGILANTES STARCOOP CTA. (SECOP supplier code `700961121`) |
 | **Repository** | `git@github.com:juanloaiza21/starcoop.git` |
 | **Status** | 🟡 Planning complete — implementation not started |
 | **Last updated** | 2026-07-28 |
@@ -198,9 +198,10 @@ Competitor records return `companyName: "Proveedor J"`, `alias: "J"` and
 `"Settings_Confidential"`. The platform is intentionally concealing who you are bidding
 against.
 
-However, `companyCode` **is** the real Colombian NIT, and NITs are resolvable against
-public SECOP open data. The bot is therefore technically capable of de-anonymising every
-rival in the room.
+However, `companyCode` is a stable **Vortal/SECOP supplier code** — *not* the NIT, as an
+earlier draft of this document wrongly asserted — and it is still resolvable to a named
+company through SECOP's public datasets. The bot is therefore technically capable of
+de-anonymising every rival in the room.
 
 **It must not.** Doing so would subvert a deliberate platform privacy control, and a
 bidder who knows exactly which rivals are present is a short step from the coordination

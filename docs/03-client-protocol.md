@@ -105,7 +105,7 @@ Rules (POLICY):
 
 - JWT and `storage_state.json`: OS keychain on the laptop, Docker secret on the VPS; file fallback is `0600` and encrypted at rest.
 - A `structlog` processor on **every** handler redacts anything matching `token=[^&\s]+`, `Bearer\s+\S+`, and cookie header values, before any sink sees the record. URLs are logged post-redaction.
-- Decommission (never between auctions): delete token + storage state, then `POST /signalr/abort` if a connection is live, then browser context wipe.
+- Decommission (never between auctions): delete token + storage state, then best-effort `POST /signalr/abort` if a connection is live (`abort` is a DERIVED endpoint, never captured — §4.6, O14; if it 404s, the connection is simply left to die by poll timeout), then browser context wipe.
 
 ### 2.5 The REST auth self-test — resolves O1, fails closed
 
@@ -190,7 +190,7 @@ The platform runs **ASP.NET SignalR 1.x/2.x ("classic")** with the `longPolling`
 | `tid` | random integer 0–11 on `/connect` | classic client convention; mirror the HAR |
 | `_` | ms-epoch cache-buster on `negotiate`/`start`/`ping` | CONFIRMED (param observed) |
 
-**Byte-identity rule (POLICY, non-negotiable):** `connectionData` and the percent-encoded `connectionToken` must be byte-identical across `connect`, `start`, `poll`, `send`, `reconnect`, `abort`. The `connectionToken` from negotiate contains `+`, `/`, `=` — it must be percent-encoded on every use; a raw `+` decodes server-side as a space and yields an unauthorized-connection error that looks like an auth failure. This class of bug is why the client is hand-rolled (~600 lines) instead of adapted from a package that hides its encoder.
+**Byte-identity rule (POLICY, non-negotiable):** `connectionData` and the percent-encoded `connectionToken` must be byte-identical across `connect`, `start`, `poll`, `send`, `reconnect`, `abort` (the last two are DERIVED endpoints, never captured — §4.6, O14). The `connectionToken` from negotiate contains `+`, `/`, `=` — it must be percent-encoded on every use; a raw `+` decodes server-side as a space and yields an unauthorized-connection error that looks like an auth failure. This class of bug is why the client is hand-rolled (~600 lines) instead of adapted from a package that hides its encoder.
 
 ### 4.2 Handshake — exact wire formats
 
@@ -221,7 +221,7 @@ Ordering rules (POLICY):
 1. Persist all negotiate fields; honor server-supplied `KeepAliveTimeout` / `DisconnectTimeout` / `ConnectionTimeout` over our defaults if they differ.
 2. The handshake is `negotiate → connect → start`, strictly ordered; hub `Connect` invocations go out only after `start` returns `{"Response":"started"}` **and** the first poll is open.
 3. `auction.Connect([auctionId])` then `chat.Connect([auctionId])` — the chat hub is joined for the roster events (`onConnected` = full connected-company list, `onNewUserConnected`, `onUserDisconnected`), which feed the panel's participant display. There is **no** outbound chat-send capability anywhere in the codebase ([Compliance](05-compliance.md)).
-4. HTTP verbs: `negotiate`/`connect`/`start`/`ping` GET; `poll`/`send`/`abort` POST with `Content-Type: application/x-www-form-urlencoded`. The captured `poll` requests list only transport/protocol/token params in the query string, placing `messageId` in the POST body (classic 2.x behavior). **DERIVED — the first implementation task is to confirm verb + `messageId` placement against the raw HAR bytes and encode both into the replay fixture.**
+4. HTTP verbs: `negotiate`/`connect`/`start`/`ping` GET; `poll`/`send` POST with `Content-Type: application/x-www-form-urlencoded` (the same POST form is assumed for the DERIVED `reconnect`/`abort` — §4.6, O14). The captured `poll` requests list only transport/protocol/token params in the query string, placing `messageId` in the POST body (classic 2.x behavior). **DERIVED — the first implementation task is to confirm verb + `messageId` placement against the raw HAR bytes and encode both into the replay fixture.**
 
 ### 4.3 Client → server: `/signalr/send`
 
@@ -290,19 +290,21 @@ stateDiagram-v2
 
 **Step 1 — `/reconnect` (cheap path, on `T:1` or transport error):**
 
+**DERIVED, not captured:** `/signalr/reconnect` appears nowhere in our evidence — the [API contract](01-api-contract.md) §4 inventory lists only `negotiate/connect/start/poll/send/ping`. The request line below is taken from the classic ASP.NET SignalR protocol, which every observed endpoint matches byte-for-byte in shape; it is a well-grounded inference, not an observation, and stays unverified until the O14 probe (§10) confirms it.
+
 ```
 POST /signalr/reconnect?transport=longPolling&clientProtocol=1.5
      &connectionToken=<pct-enc>&connectionData=<same bytes>&token=<JWT>
 body: messageId=<last persisted C>[&groupsToken=<G>]
 ```
 
-The server replays missed messages from the cursor. Retry with jittered backoff `1 s, 2 s, 4 s, 8 s…` inside a **50 s window** (classic servers discard connection state after `DisconnectTimeout`, default 30 s — so attempts past ~30 s usually fail, but the window costs nothing and covers non-default configs). Success → emit `RECONNECTED`, then **mandatory reconciliation** (§4.7) before the strategy may run.
+The server replays missed messages from the cursor. Retry with jittered backoff `1 s, 2 s, 4 s, 8 s…` inside a **50 s window** (classic servers discard connection state after `DisconnectTimeout`, default 30 s — so attempts past ~30 s usually fail, but the window costs nothing and covers non-default configs). Success → emit `RECONNECTED`, then **mandatory reconciliation** (§4.7) before the strategy may run. **Fallback (POLICY):** if `/reconnect` returns 404 — or any response indicating the endpoint is absent rather than the connection stale — the cheap path is disabled for the rest of the session and the leg goes straight to full restart, which uses only CONFIRMED endpoints and consumes restart budget. The reconnection design therefore degrades gracefully if the inference is wrong.
 
 **Step 2 — full restart (on `D:1`, rejected reconnect, or window exhaustion):** discard `connectionToken`, re-run the entire handshake (`negotiate → connect → start → hub Connects`), then reconcile.
 
 **Budget (POLICY):** ≤ 1 full restart per 20 s and ≤ 6 per auction. Past budget the leg parks in DOWN for the remainder of the auction and the REST leg's ENDGAME cadence (2.5 s) is the sole state source. Rationale: the real capture shows ~100 disconnect events across 44 companies in 10 minutes — churn is *normal* here, and a client that fights the platform's instability with aggressive reconnects becomes the "consultas masivas" traffic the WAF exists to block.
 
-**O13 note:** every `connect` writes a `MessengerLogin` row into the entity's event log (CONFIRMED — three logins visible in a 5-minute window of the capture). Whether `/reconnect` avoids the new row is **O13**; until answered, the restart budget doubles as an audit-log-hygiene control. Clean shutdown always issues `POST /signalr/abort` so the entity's log shows a tidy `MessengerLogout`.
+**O13 note:** every `connect` writes a `MessengerLogin` row into the entity's event log (CONFIRMED — three logins visible in a 5-minute window of the capture). Whether `/reconnect` avoids the new row is **O13**; until answered, the restart budget doubles as an audit-log-hygiene control. Clean shutdown issues `POST /signalr/abort` — but `abort`, like `/reconnect`, is **DERIVED** from the classic-SignalR protocol and was never observed in our captures (O14, §10). The expectation that abort produces a tidy `MessengerLogout` row is **ASSUMED**, not confirmed: the `Logs_Search_MessengerLogout` row in the capture is equally explicable by an ordinary disconnect (poll timeout), so the abort ↔ clean-logout correlation is unproven. The O13 test-auction experiment therefore covers all three questions at once: diff `GetEventLogs` around (a) a forced `/reconnect`, (b) a deliberate `abort`, and (c) confirm both endpoints exist on this deployment. A 404 on `abort` is harmless — the connection dies by poll timeout anyway, at worst leaving the same disconnect row a browser crash would.
 
 ### 4.7 Post-reconnect reconciliation (the invariant that makes all of §4 safe)
 
@@ -359,10 +361,18 @@ now_earliest() = m_now + θ − ε     # server is AT LEAST this far along → u
 
 ### 5.4 Gates and degradation (POLICY)
 
+Every clock estimate carries a **source-quality flag**, `source ∈ {RECEIVE_CLOCK, DATE_HEADER}`, set by whichever sampler produced the winning (minimum-delay) sample. The bidding gate is three conjuncts, and the third is structural, not numeric:
+
+```
+clock_ok_for_bidding = (ε ≤ 2 s) and (estimate age ≤ 60 s) and (source == RECEIVE_CLOCK)
+```
+
+The source conjunct exists because the numeric comparison alone cannot implement "the Date-header fallback must never bid": a Date-header estimate has `ε_floor = 1.5 s`, which *passes* `ε ≤ 2 s`, so without the flag the stated rule and the implemented gate would disagree. With it, this is the same rule as [Architecture](07-architecture.md) §5.3 ("not enough to bid on its own"), stated identically in both chapters. Property test (in the `hypothesis` suite of [Architecture](07-architecture.md) §10): **no generated history reaches a `BID` event while the current estimate's source is `DATE_HEADER`**, regardless of ε.
+
 | Condition | Effect |
 |---|---|
-| `ε > 2 s` or estimate age > 60 s | Clock **unreliable**: bidding gate closes, phase computation freezes (holds, never regresses), panel shows amber clock, alarm at ENDGAME |
-| SignalR leg DOWN | Fallback sampler: HTTP `Date` response headers from cadence REST calls, quantized to 1 s ⇒ `ε_floor = 1.5 s`. Enough to keep the countdown honest on the panel; **not** enough to open the bidding gate on its own — but note the gate needs `ε ≤ 2 s`, so a tight Date-header estimate can keep an already-armed auction alive marginally; the panel makes the degradation explicit and ENDGAME bids fire at T−45 s target precisely so a ±1.5 s clock still cannot miss (see [Auction mechanics](02-auction-mechanics.md) timing budget) |
+| `ε > 2 s`, or estimate age > 60 s, or `source = DATE_HEADER` | Clock **unreliable for bidding**: bidding gate closes, phase computation freezes (holds, never regresses), panel shows amber clock, alarm at ENDGAME |
+| SignalR leg DOWN | Fallback sampler: HTTP `Date` response headers from cadence REST calls, quantized to 1 s ⇒ `ε_floor = 1.5 s`, `source = DATE_HEADER`. Keeps the countdown and phase display honest on the panel; **never** opens — or keeps open — the bidding gate, even for an already-armed auction: the moment the winning sample is Date-header-derived, the gate closes and stays closed until a fresh `ReceiveClock` sample restores `RECEIVE_CLOCK` source. Stated consequence: a SignalR outage longer than the 60 s age window suspends *autonomous* bidding for its duration — REST-only mode then wins through the panel + human (copilot rung, TOMAR CONTROL), or through lances already fired at the T−45 s target before the window expired (see [Auction mechanics](02-auction-mechanics.md) timing budget). We accept that cost: a bid timed against a ±1.5 s quantized clock near a deadline is exactly the guess the last row of this table forbids. |
 | No samples at all | Freeze + alarm. We HOLD; we never guess a deadline. |
 
 All timestamps internal to the runner are monotonic + θ. `time.time()` is lint-banned outside logging ([Architecture](07-architecture.md) §2).
@@ -396,11 +406,18 @@ One stable, attributable egress IP (the VPS), registered in the runbook. The ent
 
 Full decision semantics live in the [strategy engine](04-strategy-engine.md); mechanics of δ and legality in [Auction mechanics](02-auction-mechanics.md). Here, the wire sequence only — always in this order, always through the `SubmitGateway`, non-reentrant:
 
-1. **`POST /v1/audit/SetStartBiddingAudit?auctionId=…`** — writes "Comenzar Lances" to the entity log (CONFIRMED). Idempotent per auction session; called once before the first validate of a session and after any reconcile that invalidated the session.
+1. **`POST /v1/audit/SetStartBiddingAudit?auctionId=…`** — writes "Comenzar Lances" to the entity log (endpoint and log row CONFIRMED). The captured event log shows this is **once per bid attempt, not once per session**: two `Logs_Search_StartBidding` rows (20:30:27.6078527 and 20:31:03.0025611), one for each of the two human bid attempts. POLICY, matching that observation and the cycle order in [Auction mechanics](02-auction-mechanics.md) §9.1: the gateway calls it before **every** `ValidateBid`. One honest caveat on ordering — for the *first* attempt the `NewBid` error row (20:30:27.353692) *precedes* its StartBidding row by ~254 ms, while the second attempt shows the expected order (start 20:31:03.002 → error 20:31:07.049). The platform therefore demonstrably processed a validate whose audit row had not yet landed. The most plausible reading is an asynchronous audit write (`registerDate` stamps the log commit, not the HTTP request), but log timestamps cannot settle request-level order; only the byte-level HAR timeline can, and that check is on the O2 capture checklist (§8) and in §10's open questions. Until then, audit-before-validate is **our** gateway's discipline (POLICY, DERIVED from the second attempt and the endpoint's evident purpose), not a proven platform precondition.
 2. **`POST /v1/bid/ValidateBid`** — body per the CONFIRMED shape in the [API contract](01-api-contract.md): `auctionId`, `currency`, ISO `Date`, `ranking:-1`, per-item entries (`itemId`, `quantity`, `isPriceListItem`, `isChanged`, `itemInternalReference`, `lotInternalId`, `lotName`, `itemUnit`, `totalValue`, `bidValue`, `itemQuantityUnitPrice`, `bidded`), string `totalValue`, `languageCode`. Response carries `isValid`, and on rejection `errorType` (e.g. `BidErrMin`), `errorMessageLocale`, and the localized `minBid` string — which the min-step calibrator may parse (es-CO parser, §3.5) **at most twice per auction**, because rejections are permanently logged with our NIT and IP (CONFIRMED).
    - The `itemQuantityUnitPrice` sub-object (`{ind, form, mant, exp}`) is an ICU-style decimal serialization; only the zero encoding is captured. Its non-zero encoding is part of the O2 capture target (§8) — one more reason the REST submit rung stays gated.
 3. **`SubmitBid`** — within 5 s of a successful validate, **byte-identical body reuse** (the validated bytes are the submitted bytes; recomputation between the two calls is forbidden), kill-switch check and L3 byte-level floor re-verification immediately before the write (see [Architecture](07-architecture.md) §6). Until O2 resolves, "SubmitBid" means the **browser driver** (rung 2): the Playwright process fills and clicks the audited selectors from `adapters/secop/selectors.yaml`, having passed its DOM canary at ARM time.
 4. **Reconcile** (§4.7) after every submit, including AMBIGUOUS outcomes (timeout mid-submit). An ambiguous submit is *never* blindly retried — the reconcile's `GetSupplierBids` + `GetEventLogs` read tells us whether the lance landed.
+
+> **RULE D-1 (which clock stamps the bid body's `Date`).** The `Date` field of every `ValidateBid`/`SubmitBid` body is stamped with the **disciplined server-clock estimate** `m_now + θ` — the best estimate, *not* the pessimistic edge (edges exist for deadline comparisons, §5.3; a reported timestamp should be the closest estimate of server truth, not a bound). Evidence and reasoning:
+>
+> - The captured body carried the **operator's local wall clock**: `2026-03-02T20:30:40.104Z`, which is +13.15 s ahead of the server (server ≈ 20:30:26.95). The platform rejected that bid on `BidErrMin` grounds, not date grounds — so tolerance of at least +13 s skew is CONFIRMED, and mirroring the browser (local time) would *probably* also work. What the server does with the field — echo, log, or validate — is **ASSUMED (informational)**.
+> - θ-stamping is chosen anyway because it is safe under **every** hypothesis: if the field is informational, both choices work; if the server ever compares it to its own clock (e.g. against `endDate` at the close boundary), a θ-stamped value is within ±ε ≈ 0.2–0.6 s of server truth — strictly better than anything a local clock can guarantee. It also makes our audit chain, the bid bodies, and the entity's event log tell one coherent timeline in a dispute.
+> - Interaction with the cycle: byte-identical reuse (§7.3) means the `Date` frozen at ValidateBid time is the one submitted — the 5 s TTL bounds its staleness. And because the clock gate (§5.4) closes bidding whenever the estimate is unreliable, a `Date` is never stamped from a degraded (`DATE_HEADER`) or stale estimate: no bid body exists to stamp.
+> - Verification: the OQ-02 capture records whether the success response echoes or transforms `Date` (table below; global **OQ-30**).
 
 First-bid caveat (DERIVED from the vocabulary bundle): `BidWarn_Min_Bid_Diff_Desc` suggests a bidder's *first* lance may be required to equal the base price. If true, reaching a competitive number takes two full cycles. This is a priority question for the [strategy engine](04-strategy-engine.md) timing budget and is answerable from the same O2 capture.
 
@@ -410,7 +427,7 @@ First-bid caveat (DERIVED from the vocabulary bundle): `BidWarn_Min_Bid_Diff_Des
 
 `SubmitBid` exists (the string appears in the localization bundle) but was never captured: both human attempts in the recording failed validation, so the commit call never fired. The path, verb, body, headers, and success-response schema are all **unknown**. Plan, in order of preference:
 
-**Step 1 — ask before inferring.** Request supplier-facing API documentation and access to a sanctioned test environment from Vortal (the platform vendor — the `vortalTrust` field marks their fingerprints) and Colombia Compra Eficiente. The `testAuction: true` flag in the schema proves a test-auction facility exists in the data model. A documented contract or a test auction is faster, safer, and unimpeachably legitimate compared to reverse-engineering a state-changing endpoint. ([Compliance](05-compliance.md) frames the request.)
+**Step 1 — ask before inferring.** Request supplier-facing API documentation and access to a sanctioned test environment from Vortal (the platform vendor — the `vortalTrust` field marks their fingerprints) and Colombia Compra Eficiente. The `testAuction: true` flag in the schema proves a test-auction facility exists in the data model. A documented contract or a test auction is faster, safer, and unimpeachably legitimate compared to reverse-engineering a state-changing endpoint. **But the request itself is a risk decision, not a free move**: a written query puts CCE on notice of contemplated automation, and CCE holds a preventive-suspension power (§VII.A.f). The outreach is therefore counsel-gated, with explicit decision criteria and a fallback if the answer is no — see [05 §3.7](05-compliance.md), which owns that analysis.
 
 **Step 2 — capture one real, successful, manual bid.** At the cooperative's next live auction, the operator bids **manually anyway** (bot in `copilot` mode computes the floor-clamped legal value; human types it into the real UI). The browser session records an unsanitized HAR (DevTools export, or the Playwright context's built-in HAR recorder). That single capture pins, at zero incremental risk — the bid was going to be placed regardless:
 
@@ -420,7 +437,9 @@ First-bid caveat (DERIVED from the vocabulary bundle): `BidWarn_Min_Bid_Diff_Des
 | O1: REST auth mechanism (cookies vs bearer vs both) | Unstripped request headers |
 | Non-zero `itemQuantityUnitPrice` ICU encoding | The submitted item entry |
 | First-bid-equals-base-price rule (§7) | Whether the first lance at base price validates |
+| `SetStartBiddingAudit` ↔ `ValidateBid` request order + per-attempt count (§7) | The HAR request timeline of the audit and validate calls around the manual bid — free evidence from the same session |
 | O10: does a leader's own bid extend? | `endDate` before/after, correlated with bidder |
+| OQ-30: `Date`-field semantics (RULE D-1, §7) | Whether the server accepts, echoes, or transforms the request's `Date`; the manual bid's stamp (browser local time) vs the server's log timestamps |
 
 **Step 3 — pin and gate.** The captured pair becomes (a) a frozen pydantic model in `adapters/secop/`, (b) a replay fixture in `fixtures/` (built with `tools/build_replay_fixture.py`), (c) a simulator behavior in `vortal-sim`. Only after a schema-validated round trip replays green does `submit.confirmed` flip to `true`, enabling REST rung 1. Until then every armed submit uses the browser driver (rung 2), whose contract with the DOM is guarded by the selector canary.
 
@@ -444,8 +463,8 @@ First-bid caveat (DERIVED from the vocabulary bundle): `BidWarn_Min_Bid_Diff_Des
 | `newData` debounce | 300 ms, single-flight | §3.3 |
 | Clock window / samples | 10 min / 32 | §5.3 |
 | Drift bound ρ / ε floor | 1 ms/s / 50 ms | §5.3 |
-| Clock gate | ε ≤ 2 s and age ≤ 60 s | §5.4 |
-| `Date`-header fallback ε floor | 1.5 s | §5.4 |
+| Clock gate | ε ≤ 2 s and age ≤ 60 s and source = `RECEIVE_CLOCK` | §5.4 |
+| `Date`-header fallback ε floor | 1.5 s (`source = DATE_HEADER` — display only, never opens the bidding gate) | §5.4 |
 | Token bucket | 10 burst / 2 per s | §6.1 |
 | ValidateBid rejection budget | ≤ 2 per auction | §7 |
 | ValidatedBid TTL | 5 s | §7 |
@@ -461,8 +480,10 @@ First-bid caveat (DERIVED from the vocabulary bundle): `BidWarn_Min_Bid_Diff_Des
 | O2 | `SubmitBid` path/verb/body/response | §8 plan | Blocks rung 1 only |
 | O11 | Silent token refresh without reCAPTCHA? | Clear auction-site token, re-navigate launcher, observe (§2.3) | Blocks >24 h unattended only |
 | O12 | `GetSupplierBids` pagination terminator | Page-until-empty on a multi-page auction (§3.4) | No — conservative iteration covers it |
-| O13 | Does `/reconnect` skip the `MessengerLogin` log row? | Diff `GetEventLogs` around a forced reconnect in a test auction (§4.6) | No — budget compensates |
+| O13 | Does `/reconnect` skip the `MessengerLogin` log row? Does `abort` produce the clean `MessengerLogout` row we hope for? | Diff `GetEventLogs` around a forced reconnect and a deliberate abort in a test auction (§4.6) | No — budget compensates |
+| O14 | Do `/signalr/reconnect` and `/signalr/abort` exist on this deployment at all? Both are DERIVED from the classic-SignalR protocol; neither appears in the captures ([01](01-api-contract.md) §4 lists only `negotiate/connect/start/poll/send/ping`) | Probe both in the O13 test-auction experiment (§4.6) | No — the §4.6 fallback (full restart / poll-timeout death) uses only CONFIRMED endpoints |
 | — | Poll `messageId` placement + HTTP verbs per SignalR endpoint | Byte-level re-read of the raw HAR before implementation (§4.2) | Yes — first implementation task |
+| — | `SetStartBiddingAudit` ↔ `ValidateBid` request-level order (the first attempt's log rows arrive reversed — §7) | HAR request timeline in the O2 capture (§8) | No — the gateway enforces audit-first regardless |
 | — | Semantics of `newData`'s three booleans | Correlate against event-log rows across auctions (§4.4) | No — treated as generic dirty flag |
 
 Everything in this chapter is testable offline: the handshake, reconnect budgets, cursor discipline, clock math, and cadence logic are all reproduced in `vortal-sim` with the platform's confirmed pathologies (backwards state reads, +13 s skew, `T:1` storms, mid-auction 401, es-CO `minBid` strings) — see the test strategy in [Architecture](07-architecture.md) §10 and the build order in the [Roadmap](08-roadmap.md).

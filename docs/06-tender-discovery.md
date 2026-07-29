@@ -4,7 +4,7 @@
 
 > **Position in the system:** this chapter is the **cold path** — everything upstream of the auction room. It corresponds to the `discovery/` component of the [Architecture](07-architecture.md) (§4.2): a CLI subcommand (`centinela scan`) of the one binary, optionally run from cron/launchd, **never a daemon and never an auction-day trigger**. The hot path (clock, legs, guard, submit) is specified in [Client Protocol](03-client-protocol.md) and [Strategy Engine](04-strategy-engine.md); the legal framing of the floor it feeds is in [Compliance](05-compliance.md); the auction rules the pliego foreshadows are in [Auction Mechanics](02-auction-mechanics.md).
 
-**Verification standard inherited from the research corpus:** every dataset ID, endpoint, column name and query in this chapter was executed live against production APIs on 2026-07-28, unless explicitly marked **UNVERIFIED**. Anything marked UNVERIFIED must not be built on without resolution (see §9).
+**Verification standard inherited from the research corpus:** every dataset ID, endpoint, column name and query in this chapter was executed live against production APIs on 2026-07-28, unless explicitly marked **UNVERIFIED**. Anything marked UNVERIFIED must not be built on without resolution (see §9). **This standard covers API artifacts only.** Legal and normative citations (statutes, decrees, resolutions, SMMLV figures in §5) are *not* covered by it: they follow the source discipline of [Compliance](05-compliance.md) §13, and every one of them in this chapter is individually marked with its real status below.
 
 ---
 
@@ -89,12 +89,14 @@ All access is unauthenticated and public. Politeness rules from [Architecture](0
 | SECOP II – Contratos Electrónicos | `jbjy-vk9h` | — | 2026-07-27 09:32 | Outcomes, competitor pricing, own history |
 | **SECOP II – Archivos Descarga Desde 2025** | `dmgg-8hin` | — | 2026-07-28 13:51 | **Pliego/document index** (margen mínimo lives here) |
 | **SECOPII – PAA Detalle** | `9sue-ezhx` | — | 2026-07-17 12:11 | **Forward-looking pipeline** |
-| SECOP II – PAA Encabezado | `b6m4-qgqv` | — | — | Entity budget envelope |
+| SECOP II – PAA Encabezado | `b6m4-qgqv` | **UNVERIFIED** | **UNVERIFIED** | Entity budget envelope |
 | **Proponentes por Proceso SECOP II** | `hgi6-6wh3` | 2,261,214 | 2026-07-28 06:22 | **Competitor roster per process** |
-| SECOP II – Proveedores Registrados | `qmzu-gj57` | — | — | Rival profiling |
-| SECOP II – Adiciones | `cb9c-h8sn` | — | — | Contract-extension signals |
-| SECOP II – Archivos Histórico 2023 / 2022 / ≤2021 | `3skv-9na7` / `kgcd-kt7i` / `f8va-cf4m` | — | — | Historic pliegos |
+| SECOP II – Proveedores Registrados | `qmzu-gj57` | **UNVERIFIED** | **UNVERIFIED** | Rival profiling |
+| SECOP II – Adiciones | `cb9c-h8sn` | **UNVERIFIED** | **UNVERIFIED** | Contract-extension signals |
+| SECOP II – Archivos Histórico 2023 / 2022 / ≤2021 | `3skv-9na7` / `kgcd-kt7i` / `f8va-cf4m` | **UNVERIFIED** | **UNVERIFIED** | Historic pliegos |
 | ~~SECOP II – Modificaciones a Procesos~~ | `e2u2-swiw` | — | **2021-02-15** | ⛔ **STALE — do not use** |
+
+> **Verification status:** rows carrying a row count and/or refresh timestamp were queried live on 2026-07-28. The six IDs marked **UNVERIFIED** (`b6m4-qgqv`, `qmzu-gj57`, `cb9c-h8sn`, `3skv-9na7`, `kgcd-kt7i`, `f8va-cf4m`) were identified via catalog search only and were **not queried**: their IDs, schemas and freshness must be verified before any code depends on them (per the chapter's own standard in §0/§9). They appear here to record intent, not evidence.
 
 > **Trap:** the frequently-cited "SECOP II - Procesos - 2019Q4" (`7jbx-7ain`), "SECOP II - Contratos - 202212" (`p64x-zujq`) and similar are **period-sliced snapshots**, not live tables. Only the consolidated IDs above may appear in code — and per the layer rules in [Architecture](07-architecture.md) §2, dataset IDs live in `adapters/` configuration, not in `domain/`.
 
@@ -127,7 +129,7 @@ Full column list verified via the metadata endpoint `/api/views/p6dx-8zbt.json`.
 
 **Link:** `urlproceso` — deserializes as a URL **object** `{"url": "..."}`, not a plain string. The adapter's pydantic model must reflect this or fail loudly.
 
-### 3.3 Controlled vocabularies (verified by aggregation over all 8.9M rows)
+### 3.3 Controlled vocabularies (aggregation executed over all 8.9M rows; top values recorded — completeness noted per column)
 
 **`modalidad_de_contratacion`** — the target value is exactly **`Selección abreviada subasta inversa`** (205,106 rows). Accents are significant; URL-encode properly.
 
@@ -141,10 +143,11 @@ Full column list verified via the metadata endpoint `/api/views/p6dx-8zbt.json`.
 | 61,795 | Licitación pública |
 | 4,694 | Subasta de prueba ← test auctions; **exclude** |
 | 852 | Enajenación de bienes con subasta |
+| 502,943 | **Remaining values — not enumerated.** The eight rows above sum to 8,394,804 of 8,897,747; only the top values were recorded from the aggregation. ⚠️ **This table is NOT an exhaustive enum of the column** — do not derive a controlled vocabulary from it. It establishes the target value and the `Subasta de prueba` exclusion, nothing more. |
 
-**`fase`** (within subasta inversa): `Presentación de oferta` (147,476) · `Presentación de observaciones` (47,594) · `Fase de ofertas` (4,833) · `Clarification submission` (3,660) · `None` (1,543). Note the vocabulary is bilingual and inconsistent — treat `fase` as informational, not as a state machine.
+**`fase`** (within subasta inversa): `Presentación de oferta` (147,476) · `Presentación de observaciones` (47,594) · `Fase de ofertas` (4,833) · `Clarification submission` (3,660) · `None` (1,543). These five values sum to exactly 205,106 — **exhaustive over all subasta inversa rows as of 2026-07-28** (new values may still appear later; assert, don't assume). Note the vocabulary is bilingual and inconsistent — treat `fase` as informational, not as a state machine.
 
-**`estado_del_procedimiento`**: `Seleccionado` (137,263) · `Evaluación` (50,794) · **`Abierto`** (9,729) · `Cancelado` (5,665) · **`Publicado`** (938) · `Borrador` (684) · `En aprobación` (19) · `Suspendido` (10) · `Aprobado` (4)
+**`estado_del_procedimiento`**: `Seleccionado` (137,263) · `Evaluación` (50,794) · **`Abierto`** (9,729) · `Cancelado` (5,665) · **`Publicado`** (938) · `Borrador` (684) · `En aprobación` (19) · `Suspendido` (10) · `Aprobado` (4). These nine values sum to exactly 205,106 — **exhaustive over all subasta inversa rows as of 2026-07-28**, same caveat: the scanner must tolerate (and surface) unseen values rather than crash or silently drop them.
 
 > ⚠️ **The table contains drafts and copies** (`Borrador`, references ending in `" copia"`, `"Modelo copia"`). Stage-1 hard filters must include `estado_del_procedimiento IN ('Abierto','Publicado')` and reject `referencia_del_proceso` matching `/copia|modelo|prueba/i`, plus `modalidad != 'Subasta de prueba'`.
 
@@ -299,25 +302,42 @@ The code spread includes `92121701`, `UNSPECIFIED` and `92101501`. **Design rule
 
 This section is the discovery-side origin of the floor price that [Strategy Engine](04-strategy-engine.md) treats as unrepresentable-to-violate and [Compliance](05-compliance.md) treats as law. Five enforcement layers exist at runtime; **this is Layer 0 — computing the number correctly in the first place.**
 
-### 5.1 Legal chain (verified from the resolution's own text)
+### 5.1 Legal chain — summary only; canonical treatment in [Compliance](05-compliance.md) §5
 
-- **Decreto Ley 356 de 1994, art. 92** — tariffs must guarantee at minimum the SMMLV, overtime, night and holiday surcharges, social benefits and operating costs: *"los costos y gastos de los servicios prestados por las empresas y cooperativas de vigilancia y seguridad privada no pueden estar por debajo de una tarifa mínima, fijada en salarios mínimos."*
-- **Ley 2101 de 2021** — 48 → 42 h working week, gradual, completing **2026-07-15**.
-- **Ley 2466 de 2025 (reforma laboral), arts. 10, 14 and 70 ¶** — night hours extended to 19:00–06:00 from 2025-12-25; holiday surcharge 80% (2025-07-01) → **90% (2026-07-01)** → 100% (2027-07-01); and *orders* Supervigilancia to update the regulated tariff.
-- **Resolución 20251000059517 CS de 2025** (Superintendente de Vigilancia y Seguridad Privada, agosto 2025) — the operative act. **ARTÍCULO PRIMERO** sets minimum tariffs per post covering **24 hours, 30 days a month**.
+**This section does not re-derive the legal basis of the tariff regime.** The canonical statement lives in [Compliance](05-compliance.md) §5: the minimum-tariff regime codified in **Decreto 1070 de 2015 as modified by Decreto 1561 de 2022**, with values updated by Supervigilancia administrative act (currently cited in the project record as Resolución 20251000059517). Sibling chapters have historically cited different instruments for the same "floor is law" claim ([Strategy Engine](04-strategy-engine.md) §4.1 cites Decreto 4950 de 2007 — the predecessor tariff decree pre-dating the 2015 compilation); this project adopts 05 §5 as the single reconciled chain, and any instrument not appearing in 05 §13's source list must be added there with its real verification status before being cited elsewhere.
 
-### 5.2 Verified tariff schedule (SMMLV 2026 = $1,750,905 COP, Decreto 1469 de 2025)
+**Every citation below is UNVERIFIED in the sense of 05 §13** ("referenced from general legal knowledge / secondary confirmation — counsel to confirm exact current text during the §0 sign-off"). None was fetched from a primary source during the research pass; the quoted fragment was carried over from secondary material. What discovery specifically needs from the chain:
 
-| Effective from | SMMLV | Base COP | Armada +10% | Sin armas +8% | Humano+canino +11% |
-|---|---|---|---|---|---|
-| 2025-07-01 | 9.24 | 16,178,362 | 17,796,198 | 17,472,631 | 17,957,982 |
-| 2025-07-15 | 9.53 | 16,686,125 | 18,354,737 | 18,021,015 | 18,521,598 |
-| 2025-12-25 | 9.77 | 17,106,342 | 18,816,976 | 18,474,849 | 18,988,039 |
-| 2026-07-01 | 9.85 | 17,246,414 | 18,971,056 | 18,626,127 | 19,143,520 |
-| **2026-07-15 ← current** | **10.21** | **17,876,740** | **19,664,414** | **19,306,879** | **19,843,181** |
-| 2027-07-01 | 10.38 | 18,174,394 | 19,991,833 | 19,628,345 | 20,173,577 |
+- **Decreto Ley 356 de 1994, art. 92** — **UNVERIFIED** — the statutory root the D.1070/D.1561 regime implements: tariffs must guarantee at minimum the SMMLV, overtime, night and holiday surcharges, social benefits and operating costs. Quoted fragment (*"los costos y gastos … no pueden estar por debajo de una tarifa mínima, fijada en salarios mínimos"*) is unconfirmed against the gazette text.
+- **Ley 2101 de 2021** — **UNVERIFIED** — 48 → 42 h working week, gradual, completing **2026-07-15**. This is why the tariff multiple steps mid-year (§5.2).
+- **Ley 2466 de 2025 (reforma laboral), arts. 10, 14 and 70 ¶** — **UNVERIFIED** — night hours extended to 19:00–06:00 from 2025-12-25; holiday surcharge 80% (2025-07-01) → **90% (2026-07-01)** → 100% (2027-07-01); and *orders* Supervigilancia to update the regulated tariff.
+- **Resolución 20251000059517 CS de 2025** (Superintendente de Vigilancia y Seguridad Privada, agosto 2025) — **UNVERIFIED** — the operative act per the project record. **ARTÍCULO PRIMERO** sets minimum tariffs per post covering **24 hours, 30 days a month**. 05 §13 already carries it as "counsel to confirm"; the same discipline applies here. Confirmation requires fetching the resolution from the Supervigilancia normativity page and pinning its text into the tariff engine's versioned data (SC-059, [Roadmap](08-roadmap.md)).
 
-Admin/supervision uplift by service type (ARTÍCULO PRIMERO): **10%** armed with human means · **8%** unarmed with human means · **11%** unarmed human + canine · **10%** residential strata 4/5/6 (parágrafo).
+### 5.2 Tariff schedule — multiples per the resolution (UNVERIFIED), COP values DERIVED from each row's own-year SMMLV
+
+The SMMLV multiples and their effective dates come from Resolución 20251000059517 (**UNVERIFIED**, §5.1). The COP columns are **DERIVED**: multiple × the SMMLV of the year the row is effective in — never another year's wage. Wage inputs, both **UNVERIFIED** (neither decree has been fetched from a primary source):
+
+- **SMMLV 2025 = $1,423,500 COP** (Decreto 1572 de 2024) — **UNVERIFIED**
+- **SMMLV 2026 = $1,750,905 COP** (Decreto 1469 de 2025) — **UNVERIFIED**. ⚠️ This implies a ~23% year-on-year increase — far above any recent adjustment. A figure that large must not be asserted, or built into any FloorSheet, until the decree text is fetched and pinned.
+- **SMMLV 2027** — decree not yet published; the 2027 row is not computable.
+
+| Effective from | SMMLV multiple | SMMLV used | Base COP | Armada +10% | Sin armas +8% | Humano+canino +11% |
+|---|---|---|---|---|---|---|
+| 2025-07-01 | 9.24 | $1,423,500 (2025) | 13,153,140 | 14,468,454 | 14,205,391 | 14,599,985 |
+| 2025-07-15 | 9.53 | $1,423,500 (2025) | 13,565,955 | 14,922,551 | 14,651,231 | 15,058,210 |
+| 2025-12-25 | 9.77 | $1,423,500 (2025) | 13,907,595 | 15,298,355 | 15,020,203 | 15,437,430 |
+| 2026-07-01 | 9.85 | $1,750,905 (2026) | 17,246,414 | 18,971,056 | 18,626,127 | 19,143,520 |
+| **2026-07-15 ← current** | **10.21** | **$1,750,905 (2026)** | **17,876,740** | **19,664,414** | **19,306,879** | **19,843,181** |
+| 2027-07-01 | 10.38 | 2027 decree not published | — | — | — | — |
+
+> **Correction record:** an earlier draft of this table computed the 2025-dated rows (and the 2027 row) at the 2026 wage — anachronistic, and a direct violation of §5.3.3's own rule that the floor is a pure function of `(service_type, auction_date, SMMLV_year)`. Each row now uses the SMMLV of its own effective year. COP values here are rounded to the nearest peso for display; the FloorSheet total rounds **UP** in `Centavos` (§5.4).
+
+Admin/supervision uplift by service type (ARTÍCULO PRIMERO, **UNVERIFIED** with the resolution itself): **10%** armed with human means · **8%** unarmed with human means · **11%** unarmed human + canine · **10%** residential strata 4/5/6 (parágrafo).
+
+**Engine requirements this table imposes (SC-059, [Roadmap](08-roadmap.md)):**
+
+1. **Load-time assertion:** the tariff engine must refuse to price a service date whose year does not match the SMMLV year in its versioned data — fail loudly, never silently fall back to an adjacent year's wage. One wrong SMMLV silently poisons every floor the system ever computes.
+2. **Blocking acceptance criterion:** before the engine's output is used in any FloorSheet, one 24 h/30-day post must be hand-checked against a **real awarded contract's** pricing. This is a build gate for SC-059, not a nice-to-have.
 
 ### 5.3 Why this is a hard constraint, not a guideline
 
@@ -554,6 +574,8 @@ Numbered `D*` to avoid clashing with the runtime `O*` questions in [Architecture
 | D3 | Has a Supervigilancia *circular* adjusted the 2026 tariff figures after Resolución 20251000059517? | **UNVERIFIED** | Manual monthly check of Supervigilancia normativity page (runbook item, [Roadmap](08-roadmap.md)); tariff table above carries an as-of date |
 | D4 | Long-term stability of the consolidated dataset IDs (`p6dx-8zbt` et al.) — Socrata IDs have been retired before (`e2u2-swiw` went stale in 2021) | Monitored | Startup schema assertion + `Truth-Last-Modified` staleness alarm (> 7 days ⇒ treat dataset as suspect) |
 | D5 | Whether the invitation email's metadata (sender, subject shape) is stable enough to parse as a readiness signal | **UNVERIFIED** | T−30 min readiness check relies on the portal `EAuctionBlock`, with email as a human-read backup |
+| D6 | SMMLV values and their decrees (2025: $1,423,500 / Decreto 1572 de 2024; 2026: $1,750,905 / Decreto 1469 de 2025 — the latter implies an unusually large ~23% step) plus all §5.1 normative citations — none fetched from a primary source | **UNVERIFIED — blocking for SC-059** | No FloorSheet may rely on the tariff engine until the decrees/resolution are fetched, pinned as versioned data, and one post is hand-checked against a real awarded contract (§5.2) |
+| D7 | The six catalog-search-only dataset IDs in §3.1 (`b6m4-qgqv`, `qmzu-gj57`, `cb9c-h8sn`, `3skv-9na7`, `kgcd-kt7i`, `f8va-cf4m`): existence, schema, freshness | **UNVERIFIED** | No code may depend on them; funnel stages built only on the live-queried datasets |
 
 ---
 

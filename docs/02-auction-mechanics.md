@@ -61,6 +61,16 @@ Every claim in this chapter carries one of three tags. An engineer implementing 
 > **RULE V-1.** `Forward` auctions are refused at load (per [Architecture §5.2](07-architecture.md)): every arithmetic sign in this chapter assumes descending prices, and running that code against an ascending auction inverts safety into danger.
 >
 > **RULE V-2.** `testAuction: true` → refuse to bid unless `config.allow_test_auctions` is explicitly set, and even then never emit floor-relevant real prices into a test auction (they leak our cost structure for zero contractual value).
+>
+> **RULE V-3 (arming whitelist — unsupported shapes fail closed).** V-1 and V-2 name two known-bad shapes; this rule inverts the posture into a **positive whitelist**, the same discipline as RULE B-1. ARM is permitted only when **all** of the following hold, read from a fresh full `GetAuction` at load *and re-checked at every ARM attempt* (fields can change across a `Deprecated`/re-publish cycle):
+>
+> - `auctionTypeCode == "Reversed"` (V-1);
+> - `auctionVersionCode ∈ {AuctionbyProposal, AuctionByLot, AuctionByItem}` — and the multi-scope values additionally cap the mode at `copilot` until OQ-29 resolves ([04 §3.5](04-strategy-engine.md) RULE MS-6);
+> - `auctionEvaluationTypeCode == "BestPrice"` **and** `scoreCalcFormula == null` **and** `evaluationRules == []` — multi-variable auctions exist in law (D.1082 art. 2.2.1.2.1.1.1, [05 §2.2](05-compliance.md)) and every arithmetic assumption in this chapter is pure-price; a scoring formula we cannot evaluate makes "lowest total" the wrong objective, not merely a risky one;
+> - `minimumBidType` is a recognized value with a modeled base (RULE M-1);
+> - `biddingQuantitativeItems` empty (§6.1, O-M8) and `testAuction` per V-2.
+>
+> Any other value of any of these fields — **including values never seen before** — refuses ARM with a named reason on the panel; `watch`/`copilot` remain available (reading an unsupported auction is safe; bidding into one is not). This rule is the mechanical form of [05 R-12](05-compliance.md)'s "the bot refuses to arm on unsupported types". Refusing to bid is always safe; guessing is not.
 
 ---
 
@@ -106,7 +116,7 @@ stateDiagram-v2
 | `ReadyToStart → Started` | `startDate` reached (auto) or entity clicks *Comenzar la subasta* | `Logs_Search_Announcement` / `Logs_Search_AuctionStart`, description "Subasta en Curso" | **CONFIRMED** (observed at 20:30:12.43) |
 | `Started → Started` | extension (§7) | `Logs_Search_AuctionExtended`, message `"Subasta Prorrogada por {0} segundos"` | **CONFIRMED as a log type**; arithmetic DERIVED, §7 |
 | `Started → Finished` | `endDate` reached with no pending extension | `Logs_Search_AuctionFinished` | DERIVED |
-| `Started → Paused` | entity, only if `pauseAllow == true` | `Logs_Search_AuctionSuspense` | DERIVED |
+| `Started → Paused` | entity, only if `pauseAllow == true` | `Logs_Search_AuctionSuspense` | **ASSUMED** — rests on the field *name* alone. The locale key `Settings_Allow_Pause` actually renders *"Permitir arranque manual"* ("allow manual **start**"), so the bundle does **not** corroborate the pause reading; the label may be mis-keyed or the field may gate manual start instead. Needs a `pauseAllow: true` auction to settle |
 | `Paused → Started` | entity resumes; `pauseOptions: "ExtraTimeAndComment"` implies resume may grant extra time and requires a comment | `Logs_Search_AuctionResumed` | DERIVED |
 | `* → Canceled` | entity, mandatory justification (`Settings_Cancel_Comments`) | `Logs_Search_AuctionCanceled` | DERIVED |
 | `* → Deprecated` | tender amendment invalidates the auction | `Logs_Search_AuctionDeprecated` | DERIVED |
@@ -165,7 +175,9 @@ Our own row in `bidders[]` carries `eauctionFinishParticipation`. Once anyone on
 
 > **RULE C-1 (single time authority).** The only authoritative time source is `auction.ReceiveClock`, obtained by invoking `auction.RequestClock([])` over SignalR (wire details in [03-client-protocol.md](03-client-protocol.md)). Maintain `offset θ = server_time − local_monotonic_at_receipt` as a **median of the last N ≥ 5 samples**, discarding samples whose enclosing poll lasted > 2 s (delivery jitter inflates them one-directionally — a minimum-delay filter is the correct estimator shape).
 >
-> **RULE C-2 (sampling cadence).** ≥ 1 sample / 10 s while `Started`; ≥ 1 sample / 2 s during the final 120 s. The observed human client used 8–30 s (~8–10 s during the auction). Never below ~2 s: that becomes abusive polling and violates the politeness constraint ([05-compliance.md](05-compliance.md)).
+> **RULE C-2 (sampling cadence — a range with an abuse floor).** One clock sample per **10–15 s** while `Started`; one per **5 s** during the final **120 s** before the current `endDate`; and an absolute floor of **never more than one sample per ~2 s** — beyond that the cadence becomes abusive polling and violates the politeness constraint ([05-compliance.md](05-compliance.md)). The floor is a *prohibition*, never a target: the mandated rates above sit well clear of it by design (the previous wording of this rule demanded 1/2 s in the endgame while calling that same rate abusive — that contradiction is removed). The observed human client used 8–30 s (~8–10 s during the auction), so the whole mandated range is gentler than the platform's own UI.
+>
+> *Alignment note for [03-client-protocol.md](03-client-protocol.md) §3.3:* its `RequestClock` tiers (15 s ARMED / 5 s ENDGAME) satisfy C-2 **only if** the 5 s clock tier begins at **T−120 s**. Since ENDGAME there is defined as T−60 s, the clock cadence's tighter tier is normatively extended to the final 120 s (the REST cadence tiers are unaffected); §3.3's table must reflect this.
 >
 > **RULE C-3 (monotonic arithmetic).** All deadline arithmetic is `local_monotonic + θ` — never wall-clock, which can step (NTP) mid-auction. `time.time()` is lint-banned outside logging ([Architecture §2](07-architecture.md)).
 >
@@ -237,15 +249,19 @@ Structural consequence: **for this auction the minimum step was an absolute curr
 | Code | Label | Interpretation of `minBidDifference` | Grade |
 |---|---|---|---|
 | `1` | `"Percentage"` | percent, base per §4.6 | **CONFIRMED** |
-| `0` | probably `"Value"` / `"Amount"` | absolute currency amount per item | **DERIVED** — the field needs a type tag precisely because the same numeric field can be either; VORTAL's UI offers *Lance mínimo* as either a % or a value; a 0-based enum with 1=Percentage makes 0=Value the overwhelmingly likely partner |
+| `0` | probably `"Value"` / `"Amount"` | absolute currency amount per item | **DERIVED** — the field needs a type tag precisely because the same numeric field can be either; VORTAL's UI offers *Lance mínimo* as either a % or a value; a 0-based enum with 1=Percentage makes 0=Value the overwhelmingly likely partner. **Never observed against a live server — per RULE M-1 this interpretation does not authorize an autonomous bid** |
 | `2` | possibly `"PercentageOfBest"` or `"None"` | percent of the *current best / last valid lance* rather than the initial price | **ASSUMED** — no direct evidence; the UNP counterexample (§4.6) makes some such variant likely to exist |
 | `3`+ | unknown | — | **ASSUMED** |
 
 ### 4.4 Safety rules for the decrement
 
-> **RULE M-1 (fail closed on unknown type).** If `minimumBidType ∉ {0, 1}` (or the string form ∉ `{"Value","Amount","Percentage"}`), the engine must not compute a bid. It enters `DEGRADED_UNKNOWN_RULE`: observe-only, human confirmation required per bid.
+> **RULE M-1 (fail closed on unobserved type).** Autonomous bid computation is permitted only for `minimumBidType == 1` (string form `"Percentage"`) — the sole value ever observed (CONFIRMED, §4.2). Any other value — **including `0`** — routes to `DEGRADED_UNKNOWN_RULE`: observe-only, human confirmation required per bid. Rationale: §4.3's reading of `0` as an absolute amount is DERIVED but has never been tested against a served `minBid`, and §0's contract forbids letting an unverified interpretation alone price a lance; an allowed set of `{0, 1}` would have made the one unverified member of the set the one that computes real money. The allowed set widens to include `0` only after a type-0 auction is captured and the interpretation confirmed against the server's own arithmetic.
 >
 > **RULE M-2 (never guess a smaller decrement).** When more than one interpretation of the rule is live (see §4.6), a candidate bid is legal only if it satisfies **every** live interpretation simultaneously — i.e. the engine applies the **maximum** candidate decrement (equivalently: bids at the lowest of the candidate thresholds). If that maximally-strict bid would breach the floor, the outcome is `STOP` (floor reached), never "try the lenient interpretation". An insufficient decrement is not merely rejected — it burns an entity-visible audit entry (finding 0.1.5).
+>
+> *Acknowledged cost:* maximal strictness is not free. With candidates {δ % of the **initial** price (large, fixed)} and {δ % of the **last valid lance** (shrinking)}, the maximum is always the initial-based candidate, so every pre-calibration lance concedes the full fixed step — margin the true rule may never have demanded, in direct tension with the strategy's corollary that the engine never "spends" price to accelerate toward the floor ([04-strategy-engine.md](04-strategy-engine.md) §2.1). M-2 buys legality with margin; §4.6 therefore front-loads calibration so the engine leaves this regime after at most one server datum, and prefers not to place a large-step lance at all while two bases are live.
+>
+> *Implementation contract (binding on [04-strategy-engine.md](04-strategy-engine.md)):* a single scalar `min_step` cannot represent M-2. `AuctionView` (04 §3.4) must additionally expose `min_step_candidates: tuple[Centavos, ...]`, and `next_legal_total` (04 §6.1) must compute against `max(min_step_candidates)` until calibration collapses the tuple to the one resolved δ (which then also populates `min_step` per RULE M-3).
 >
 > **RULE M-3 (server as oracle, budgeted).** `ValidateBid` returns `minBid` as a formatted es-CO string on rejection. Parse it (§9.3), cache it as `δ_observed`, and thereafter assert `computed_min_step == δ_observed`; on mismatch, halt and alert. **Never** binary-search `ValidateBid` to discover the rule: every failed validation is written to the procuring entity's log with our NIT and IP. Hard budget: **≤ 2 ValidateBid rejections per auction**, aligned with [Architecture §4.6](07-architecture.md).
 >
@@ -263,8 +279,10 @@ P0u_i  = itemInitialUnitPrice_i                # initial UNIT price
 P0_i   = itemInitialPrice_i                    # initial TOTAL for the item (= P0u_i × Q_i, see §6.1)
 d_i    = minBidDifference_i
 
-step_i =  d_i                                  if minimumBidType == 0   (absolute)
-       =  round_up(P0_i × d_i / 100, 2)        if minimumBidType == 1   (percentage of initial, §4.6)
+step_i =  round_up(P0_i × d_i / 100, 2)        if minimumBidType == 1   (percentage of initial, §4.6)
+       =  d_i                                  if minimumBidType == 0   (hypothesised absolute amount,
+                                               §4.3 — reachable ONLY under human per-bid confirmation
+                                               in DEGRADED_UNKNOWN_RULE, per RULE M-1; never autonomous)
 ```
 
 **Aggregates:**
@@ -283,14 +301,19 @@ round_up(x, 2) ≡ ceil(x × 100) / 100           # ROUND_CEILING for positive v
 ```
 
 - Apply `round_up` to **`step_i`** — rounding the required decrement up makes the constraint stricter → safe.
-- Apply `round_up` to **any bid we emit** — a higher price is safer for margin and can never breach the floor from above.
-- **Never** round down or round-half-even on either quantity. In a reverse auction every rounding decision must move the number **up**.
+- The **emitted bid is the opposite case.** The candidate `T = ref − step_total` already sits at the *maximum* legal value; moving it **up** by any amount — including "harmlessly" ceiling it onto the peso grid — pushes it above the legality threshold and it is rejected (burning an audit entry, finding 0.1.5). Emitted bids quantise **down**; see RULE M-5.
+- Direction rule, stated once: rounding a **requirement** (step, threshold) moves **up** — stricter is safe; rounding an **emission** (our bid) moves **down** — still legal, cost ≤ 1 grid unit of margin. Never round-half-even on either. Any rounding that could carry an emitted total above `ref − step_total` is a bug, not a safety margin.
 - `totalNum: 20` is the maximum total digit count; exceeding it raises `BidWarn_Wrong_Decimal` (§9). With 2 decimals that leaves 18 integer digits — not a practical COP constraint, but validated anyway before serialisation.
 
 **COP and the decimals paradox.** COP has no circulating sub-unit and SECOP price lists are whole pesos (`115 670 523.00`) — yet `decimalNum = 2`, `hasDecimalPlace = true`, and the step itself carries centavos (`…,23`). Resolution:
 
-> **RULE M-5 (centavos in, whole pesos out).** Compute every constraint in centavos with exact integers. Emit bids **quantised to whole pesos, rounded up**: `bid = ceil(bid_raw_pesos)`, serialised with `.00`. Rationale: (a) once the *requirement* is rounded up, a whole-peso bid at or below the threshold can never be rejected as insufficiently low; (b) whole-peso bids are legible to the entity and auditors; (c) it deletes an entire class of formatting bugs.
-> Corollary for this auction: our effective step is `ceil(1 156 705.23) = 1 156 706 COP` — one peso stricter than required, which is the correct direction to err.
+> **RULE M-5 (centavos in, whole pesos out — step rounds up, bid rounds down).** Compute every constraint in centavos with exact integers. Round the **required step** up (`round_up`, §4.5) — stricter is safe. Quantise the **emitted bid** down to the whole-peso grid: `bid = floor(T_raw_pesos)`, serialised with `.00`. After quantisation, re-check both bounds on the quantised value:
+> **(a)** `bid ≤ ref − step_total` — guaranteed by construction (up-rounded step, floored bid) and asserted anyway;
+> **(b)** `bid ≥ F` (the configured floor) — flooring can cross `F` when `T_raw` lies within one peso of it; if it does, the outcome is `STOP` (`FLOOR_REACHED`), never "round back up".
+> Rationale: a whole-peso bid at or below the up-rounded threshold can never be rejected as insufficiently low; whole-peso bids are legible to the entity and auditors; and splitting the direction deletes the bug class where a "safe" ceiling on the bid silently produces an *illegal* bid — the previous version of this rule (`bid = ceil(...)`) had exactly that defect: `T = ref − step` ceilinged upward exceeds the threshold and is rejected.
+> Corollary for this auction (whole-peso `ref`): `floor(ref − 1 156 705.23) = ref − 1 156 706`, i.e. an effective step of `1 156 706 COP` — one peso stricter than required, the correct direction to err. Note this equals `ref − ceil(step)`: on a whole-peso `ref` the two formulations coincide; they diverge precisely when someone ceilings the *bid* instead of the *step*, which is the forbidden operation.
+> *Implementation note for [04-strategy-engine.md](04-strategy-engine.md) §6.1:* `next_legal_total`'s grid quantisation of the candidate total must be **ROUND_FLOOR** followed by the floor-`F` re-check above; its former `round_up_to_grid(…)`/ROUND_CEILING call on `min(own_ceiling, best − tick)` violated this rule and would emit rejectable bids.
+> *Test obligation:* a property test asserts that **every emitted total satisfies `T ≤ ref − step_total` *after* grid quantisation**, across randomized `ref`, δ, floors, and grid sizes.
 
 ### 4.6 The base of the percentage — a live cross-auction contradiction
 
@@ -302,6 +325,8 @@ Per-auction calibration procedure (normative):
 2. Until calibrated, RULE M-2 applies: a bid must satisfy **all** candidates.
 3. The first authoritative server datum — an **accepted** bid (preferred; costs nothing) or a rejection's `minBid` string (costs budget) — selects the surviving candidate. Assert every subsequent computation against it (RULE M-3).
 4. If no candidate matches the server's `minBid` → `DEGRADED_UNKNOWN_RULE`, human per-bid confirmation.
+
+Calibration is not cosmetic — **pre-calibration bidding costs margin.** Until the base is resolved, RULE M-2 prices every lance at the largest live candidate; with {δ % of initial (fixed)} vs {δ % of last valid lance (shrinking)} in play, the initial-based candidate always dominates, so each maximally-strict lance concedes the full fixed step even if the true rule demanded less. Doctrine: resolve the base **passively before bidding large** — read `minBidDifference` / `minimumBidType` from `GetAuction` at load, and calibrate against the first *accepted* lance visible in the room (a rival's acceptance is free evidence: its delta against the prior reference discriminates the bases) rather than placing a large-step lance of our own while two interpretations remain live.
 
 ---
 
@@ -378,6 +403,7 @@ Field formulas (per item *i*, all in exact decimal, serialised per §4.5):
 | `itemQuantityUnitPrice_i` | observed equal to the item total in the capture; presumed `bidValue_i × Q_i` | ASSUMED — mirror the captured relationship byte-for-byte; never invent a third value |
 | `totalValue` (bid) | `Σ_i totalValue_i` over the bidding scope | DERIVED |
 | `ranking` | constant `-1` in requests (placeholder) | CONFIRMED |
+| `Date` | disciplined server-clock estimate at body construction — normative rule D-1 in [03 §7](03-client-protocol.md) | POLICY. The captured value (`2026-03-02T20:30:40.104Z`) was the operator's **local** clock, +13.15 s ahead of the server (server time ≈ 20:30:26.95, §3) — so the platform demonstrably tolerates double-digit skew here; what the server *does* with the field is ASSUMED (informational), unresolved until the OQ-02 capture |
 | `isChanged_i` | `true` when the item's value differs from our previous lance's value for that item | ASSUMED — the capture only shows first bids; safest uniform choice is `true` on every included item |
 | `bidded_i` | `true` for every item included in the bid | CONFIRMED present; the completeness rule below governs *which* items appear |
 
@@ -402,17 +428,23 @@ Field formulas (per item *i*, all in exact decimal, serialised per §4.5):
 | Field | Observed | Meaning | Semantics grade |
 |---|---|---|---|
 | `extraTimeAutomaticAllow` | `true` | automatic extensions enabled | CONFIRMED value; mechanism DERIVED |
-| `extraTimePeriod` | `3` | extension length, **minutes** | CONFIRMED (unit corroborated by the log message rendering seconds: 3 min = "180 segundos") |
+| `extraTimePeriod` | `3` | extension length, **minutes** | value CONFIRMED; **minutes unit DERIVED** — corroborated by the locale bundle: `Settings_Extra_Time_Interval` = *"Tiempo extra minutos"* ([09-platform-vocabulary.md](09-platform-vocabulary.md)). An earlier draft cited the log message "3 min = 180 segundos" as corroboration; that inference was invalid — `Log_Message_AuctionExtended` (*"Subasta Prorrogada por {0} segundos"*) proves only that the **log** renders seconds, and no extension fired in the capture, so no `{0}` value was ever observed |
 | `extraTimeLastMinutesStartPeriod` | `1` | trigger window: the final N **minutes** before `endDate` | CONFIRMED value; window semantics DERIVED |
 | `activateExtraTimeWinner` | `true` | extension tied to winner change — exact trigger condition unresolved | value CONFIRMED; **semantics ASSUMED**, see 7.3 |
 | `extraTimeManualAllow` | `false` | entity cannot add time manually in this auction | CONFIRMED |
+| `extraTimeMaximumBids` | `null` | cap on the number of lances in extra time — **unset in this auction** | value CONFIRMED; "null = no cap configured" DERIVED; non-null semantics ASSUMED (O-M10) |
+| `startingExtraTimeMaximumBids` | `null` | initial value of that counter | value CONFIRMED; semantics ASSUMED (O-M10) |
 | Log evidence | — | `Logs_Search_AuctionExtended`, message `"Subasta Prorrogada por {0} segundos"` | CONFIRMED as log type/key |
 
 `endDate` **mutates in place on every extension** (the read model serves the new deadline; the original schedule survives as the separately-served original end — the panel displays both, [Architecture §4.8](07-architecture.md)). **CONFIRMED** as read-model behaviour.
 
 ### 7.2 The mechanism (DERIVED)
 
-A qualifying bid accepted at server time `t` with `t ∈ [endDate − extraTimeLastMinutesStartPeriod, endDate)` extends the auction: `endDate := endDate + extraTimePeriod`. Extensions are unbounded in count — no maximum appears anywhere in the payloads, templates, or locale bundle.
+A qualifying bid accepted at server time `t` with `t ∈ [endDate − extraTimeLastMinutesStartPeriod, endDate)` extends the auction: `endDate := endDate + extraTimePeriod`.
+
+**Extension count: unlimited *in this auction* because the cap was unset — not because no cap exists.** An earlier draft claimed "no maximum appears anywhere in the payloads, templates, or locale bundle"; that was wrong. The cap is a first-class platform feature: `GetAuctionSimple` returns `extraTimeMaximumBids: null` and `startingExtraTimeMaximumBids: null` (CONFIRMED, [01-api-contract.md](01-api-contract.md)), and the locale bundle carries `Settings_Maximum_Bids_Extra_Time` — *"Contador de máximo de lances en tiempo extra (el número disminuye siempre que se realiza un lance)"* — with an AltText clarifying the counter is **shared across all suppliers**, not per supplier ([09-platform-vocabulary.md](09-platform-vocabulary.md)). Reading `null` as "no cap configured here" is **DERIVED**; every "unlimited extensions" statement in this documentation set (including [04-strategy-engine.md](04-strategy-engine.md) M5 and [07-architecture.md](07-architecture.md) principle 2) is scoped to `extraTimeMaximumBids == null`.
+
+> **RULE X-4 (finite extension budget).** When `extraTimeMaximumBids` is non-null, the engine must track the remaining counter — decremented per lance in extra time, shared across suppliers per the locale AltText (decrement semantics ASSUMED until observed, O-M10) — because **the extension that exhausts the budget fixes the true final deadline**: after it, the anti-sniping guarantee is gone and a genuine last window exists. The endgame policy must switch accordingly (the "sniping does not exist" doctrine of §7.4 does not apply). Until the finite-budget semantics are captured, a non-null value forces conservatism: treat the currently served `endDate` as potentially final whenever the local counter estimate reaches 0, and surface the counter on the operator panel.
 
 Two arithmetic variants are indistinguishable on current evidence (**O-M5**): `endDate += P` versus `endDate := t_bid + P`. Both are moot for us because of:
 
@@ -446,9 +478,9 @@ W0 = [20:39:00, 20:40:00)                      # trigger window before E0
                                                   (Logs_Search_AuctionFinished)
 ```
 
-A "10-minute" auction ran 16 minutes; in principle it is unbounded. Every deadline above is evaluated on the disciplined server clock — with the operator's real +13.15 s skew, a locally-computed W2 would have missed by its entire width.
+A "10-minute" auction ran 16 minutes; with `extraTimeMaximumBids == null` it is in principle unbounded. Every deadline above is evaluated on the disciplined server clock — with the operator's real +13.15 s skew, a locally-computed W2 would have missed by its entire width.
 
-**Strategic consequence (DERIVED, and the whole reason §7 matters):** sniping does not exist on this platform. A bid in the window gifts every rival 3 more minutes; reaction *reliability* beats reaction *speed*. The engine's doctrine — bid early at T−45 s, keep the REST leg alive, survive socket death — follows directly from this section plus §3.1.
+**Strategic consequence (DERIVED, and the whole reason §7 matters):** sniping does not exist **in an auction whose extension budget is unset** (`extraTimeMaximumBids == null`, as observed). A bid in the window gifts every rival 3 more minutes; reaction *reliability* beats reaction *speed*. The engine's doctrine — bid early at T−45 s, keep the REST leg alive, survive socket death — follows directly from this section plus §3.1. In a capped auction (RULE X-4) the last extension restores a real final deadline, and the endgame policy must account for it.
 
 ---
 
@@ -515,7 +547,7 @@ Every row maps to at least one property/replay test in the offline suite (nothin
 | I-4 | No deadline arithmetic on wall-clock or unreliable θ | C-1..C-4 | clock + loop gate |
 | I-5 | No bid cycle initiated inside the §3.1 cutoff | §3.1 | strategy + gateway |
 | I-6 | Decrement computed per item, maximally strict across live interpretations, rounded up | M-1, M-2, M-4, §4.5 | domain |
-| I-7 | Emitted bids are whole pesos, ceil-rounded, ≤ `totalNum` digits | M-5 | domain + serialiser |
+| I-7 | Emitted bids are whole pesos: step ceil-rounded, bid **floor-quantised**, then re-checked `T ≤ ref − step_total` and `T ≥ F` (breach → STOP), ≤ `totalNum` digits; property-tested post-quantisation | M-5 | domain + serialiser |
 | I-8 | δ asserted against `δ_observed` after first server datum; mismatch halts | M-3, §4.6 | guard |
 | I-9 | Threshold uses `ref = min(own_last_server, best)`; R4-fallback regime maps to STOP | R-1, R-2 | domain |
 | I-10 | ValidateBid always precedes submit; byte-identical reuse; 5 s TTL | §9.1 | gateway |
@@ -523,6 +555,7 @@ Every row maps to at least one property/replay test in the offline suite (nothin
 | I-12 | AMBIGUOUS outcomes reconcile before any retry | §9.2 | gateway |
 | I-13 | `endDate` only ever read from the server; high-water guarded | X-1, X-2 | state store |
 | I-14 | No plan depends on our own bid causing an extension | X-3 | strategy |
+| I-14b | Non-null `extraTimeMaximumBids` → extension counter tracked; "unlimited" doctrine suspended | X-4 | strategy + state store |
 | I-15 | Missing visibility data degrades to HOLD/self-referenced bidding, never a guess | VIS-2 | strategy |
 | I-16 | No bid below any floor at any scope — five independent layers, latched kill on violation | L-2 (mechanics of floors: [04-strategy-engine.md](04-strategy-engine.md)) | guard L1–L5 |
 
@@ -535,7 +568,7 @@ Numbered `O-M*` to keep them distinct from the protocol-level unknowns (O1, O2, 
 | ID | Question | Blast radius if wrong | Interim mitigation |
 |---|---|---|---|
 | **O-M1** | What selects the percentage *base* — `itemInitialPrice` (observed, SASI-001-2026) vs last valid lance (documented in the UNP SASI-064-2026 pliego)? Keyed by `minimumBidType` or another field? | wrong δ → rejected bids (burned budget) or over-conceded margin | dual-candidate calibration §4.6; RULE M-2 |
-| **O-M2** | Exact enum for `minimumBidType` values `0`, `2`, `3+` | unknown-rule auctions unbiddable | RULE M-1 fail-closed mode |
+| **O-M2** | Exact enum for `minimumBidType` values `0`, `2`, `3+` (only `1` is CONFIRMED; `0` stays in `DEGRADED_UNKNOWN_RULE` until a type-0 auction is captured) | unknown-rule auctions unbiddable autonomously (safe direction) | RULE M-1 fail-closed mode |
 | **O-M3** | Is R4 the true reference rule? (needs a captured *accepted* bid — couples to the SubmitBid contract, O2) | validation surprises mid-auction | RULE R-3 freeze-on-contradiction |
 | **O-M4** | `activateExtraTimeWinner` trigger: any bid vs winner-changing bid | mispredicted auction length | RULE X-3 asymmetric assumption |
 | **O-M5** | Extension arithmetic: `endDate += P` vs `t_bid + P` | none while RULE X-1 holds | never computed locally |
@@ -543,5 +576,6 @@ Numbered `O-M*` to keep them distinct from the protocol-level unknowns (O1, O2, 
 | **O-M7** | Exact spellings of `Finished` / `Paused` / `Canceled` / `Deprecated` on the wire | unrecognized-string false halts (safe direction) | case-insensitive compare + fail-closed |
 | **O-M8** | Semantics of `biddingQuantitativeItems`, `sumUnitPrice` definition, and item-total rounding at `Q ≠ 1` | wrong bid body in multi-quantity auctions | load-time assertions §6.1; refuse non-empty quantitative arrays |
 | **O-M9** | Are partial bids ever valid in `AuctionbyProposal`? | rejected lance | RULE L-1 always sends complete scope |
+| **O-M10** | Semantics of a non-null `extraTimeMaximumBids`: exact decrement rule (which lances count? shared-across-suppliers per the AltText?), and behaviour at exhaustion | endgame policy wrong in capped auctions — a real snipe window would exist unrecognized | RULE X-4: track the counter, treat served `endDate` as potentially final at counter 0 |
 
 Each `O-M` resolution is a documentation change to *this* chapter first, code second — per the source-of-truth discipline in [07-architecture.md](07-architecture.md).

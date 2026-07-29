@@ -2,7 +2,6 @@
   "$schema": "starcoop/bid-validation-vectors/v1",
   "description": "Conformance vectors for the local bid-legality check. Any implementation of the bid-arithmetic rules must produce these verdicts. Cases marked confidence GROUND_TRUTH were observed directly from the live platform and are non-negotiable; DERIVED cases follow from the confirmed rule; ASSUMED cases encode a rule we have not yet verified and MUST be revisited after the read-only observer phase (see docs/08-roadmap.md).",
   "purpose": "The bot computes a candidate bid locally, checks it against these rules, and only then calls ValidateBid. The local check exists so the bot never wastes a round trip -- and never writes a rejected bid into the platform's permanent audit trail -- on a bid it could have known was illegal.",
-
   "auctionUnderTest": {
     "source": "SASI-001-2026, captured 2026-03-02",
     "auctionTypeCode": "Reversed",
@@ -30,13 +29,11 @@
       }
     ]
   },
-
   "derivedConstants": {
     "minimumStepAbsolute": 1156705.23,
     "howDerived": "minimumBidType is Percentage and minBidDifference is 1.0, so the step is 1.0% of itemInitialPrice: 115670523.00 * 0.01 = 1156705.23. Confirmed by the platform quoting exactly '1.156.705,23 COP' in its rejection message.",
     "criticalNote": "The step is a percentage of the INITIAL price, not of the current best bid. It is therefore a FIXED absolute amount for the entire auction. An implementation that recomputes the step against the current price will drift and produce illegal bids as the price falls."
   },
-
   "rules": [
     {
       "id": "R1",
@@ -79,37 +76,40 @@
       "consequence": "This check must run last and must be impossible to bypass."
     }
   ],
-
   "vectors": [
     {
       "id": "V-001",
       "confidence": "GROUND_TRUTH",
-      "description": "Real rejection observed live: bidding 0 COP with no previous bid of our own.",
+      "description": "Real rejection observed live: bidding 0 COP with no previous bid of our own. At this moment a competitor had already bid 0.00 COP (confirmed in the replay fixture), so 0 was the binding reference and no bid could be a full step below it.",
       "given": {
         "previousOwnTotal": null,
         "candidateTotal": 0.0,
-        "floorPrice": 90000000.0
+        "floorPrice": 90000000.0,
+        "bestCompetitorTotal": 0.0
       },
       "expect": {
         "legal": false,
         "errorType": "BidErrMin",
-        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc"
+        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc",
+        "reason": "The platform's BidErrMin conflates 'not lower' with 'not lower by a full step'; its own message asserts both. Either reading refuses this bid."
       },
       "observedMinBidQuotedByPlatform": "1.156.705,23 COP"
     },
     {
       "id": "V-002",
       "confidence": "GROUND_TRUTH",
-      "description": "Real rejection observed live: bidding 1 COP.",
+      "description": "Real rejection observed live: bidding 1 COP. At this moment a competitor had already bid 0.00 COP (confirmed in the replay fixture), so 0 was the binding reference and no bid could be a full step below it.",
       "given": {
         "previousOwnTotal": null,
         "candidateTotal": 1.0,
-        "floorPrice": 90000000.0
+        "floorPrice": 90000000.0,
+        "bestCompetitorTotal": 0.0
       },
       "expect": {
         "legal": false,
         "errorType": "BidErrMin",
-        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc"
+        "errorMessageLocale": "BidWarn_Total_MinBid_Diff_Desc",
+        "reason": "The platform's BidErrMin conflates 'not lower' with 'not lower by a full step'; its own message asserts both. Either reading refuses this bid."
       },
       "observedMinBidQuotedByPlatform": "1.156.705,23 COP"
     },
@@ -122,7 +122,9 @@
         "candidateTotal": 114513817.77,
         "floorPrice": 90000000.0
       },
-      "expect": { "legal": true }
+      "expect": {
+        "legal": true
+      }
     },
     {
       "id": "V-004",
@@ -148,7 +150,9 @@
         "candidateTotal": 110000000.0,
         "floorPrice": 90000000.0
       },
-      "expect": { "legal": true }
+      "expect": {
+        "legal": true
+      }
     },
     {
       "id": "V-006",
@@ -174,7 +178,9 @@
         "candidateTotal": 97843294.77,
         "floorPrice": 90000000.0
       },
-      "expect": { "legal": true }
+      "expect": {
+        "legal": true
+      }
     },
     {
       "id": "V-008",
@@ -200,7 +206,9 @@
         "candidateTotal": 90000000.0,
         "floorPrice": 90000000.0
       },
-      "expect": { "legal": true }
+      "expect": {
+        "legal": true
+      }
     },
     {
       "id": "V-010",
@@ -219,8 +227,8 @@
     },
     {
       "id": "V-011",
-      "confidence": "DERIVED",
-      "description": "Too many decimal places for an auction declaring decimalNum 2. Deliberately well below the previous bid so that the ONLY violation is precision -- a vector that fails for two reasons cannot tell you which rule the implementation got wrong.",
+      "confidence": "STRUCTURAL",
+      "description": "Sub-centavo precision. Enforced at the PARSING boundary, not by the legality engine: bids are integer centavos internally, so a sub-centavo value is unrepresentable by construction. The parser must reject it rather than round silently.",
       "given": {
         "previousOwnTotal": 115670523.0,
         "candidateTotal": 110000000.123456,
@@ -228,7 +236,8 @@
       },
       "expect": {
         "legal": false,
-        "errorMessageLocale": "BidWarn_Wrong_Decimal"
+        "errorMessageLocale": "BidWarn_Wrong_Decimal",
+        "enforcedBy": "centinela.domain.money.parse_decimal_string raises ValueError"
       }
     },
     {
@@ -276,11 +285,12 @@
       }
     }
   ],
-
   "notes": [
     "V-001 and V-002 are the only vectors taken directly from live platform responses. Everything else is derived from the confirmed rule or encodes a project safety rule.",
     "V-006 exists because computing the step against the current price instead of the initial price is the most likely silent correctness bug in this system. It produces bids that look right and are rejected.",
     "V-008 through V-010 and V-014 concern the floor price. They must be enforced by the bot itself: the platform will not stop us from bidding into a loss.",
-    "R5 (first bid equals base price) is deliberately NOT encoded as a vector, because we have not verified it. Encoding an unverified rule as a passing test would manufacture false confidence."
+    "R5 (first bid equals base price) is deliberately NOT encoded as a vector, because we have not verified it. Encoding an unverified rule as a passing test would manufacture false confidence.",
+    "V-001/V-002 carry the observed competitor state (best bid 0.00 COP). Without it the vectors were under-specified and any engine would have to guess why the platform refused.",
+    "V-011 is graded STRUCTURAL: representing money as integer centavos eliminates the sub-centavo bug class by construction, so the vector is satisfied at the parser rather than by a runtime check."
   ]
 }

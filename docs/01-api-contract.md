@@ -768,8 +768,23 @@ amount for the whole auction — *not* a percentage of the current best bid.
 
 ### Bidder roster (`bidders`) — anonymised by design
 
-48 bidders were registered for this auction. Competitor identity
-fields are deliberately masked by the platform:
+**Participant counts — canonical figures.** Chapters have cited slightly different
+numbers ("48 bidders", "44 companies", "44 rivals"). This table is the single source;
+every other chapter should cite it rather than re-derive:
+
+| Figure | Value | Derivation | Grade |
+|---|---:|---|---|
+| Registered bidders | **48** | Length of the `bidders[]` array in the full `GetAuction` response. The excerpt in §2 is truncated by the digest's size cap; the full array is preserved in `fixtures/auction-sasi-001-2026.json` (see its README: "Registered bidders: 48"). Includes our own company `700961121`; the pseudonyms `<COMPETITOR_01>`–`<COMPETITOR_47>` account for the other **47 registered rivals**. | CONFIRMED |
+| Companies seen connected during the auction | **44** | Union of `companyCode` over **all** `chat.onConnected` roster snapshots and `chat.onNewUserConnected` frames across the five captures, computed by `tools/analyze_timing.py` ("companies seen in the room"). Includes our own company → **43 rivals ever connected**. | DERIVED |
+| Room population at one instant | 27 | The single `chat.onConnected` snapshot quoted in §4 holds exactly 27 codes — a point-in-time view, **not** the total. | CONFIRMED |
+
+No single captured message contains 44 codes; 44 exists only as the union above.
+Phrasings to use: "48 registered (47 rivals)", "44 companies seen in the room
+(including us; 43 rivals)". "44 rival companies" — which would imply 45 total —
+is imprecise and should be corrected where it appears (00, 02, 06, 07 cite these
+counts; connection-churn statistics over the same roster are in §5 below).
+
+Competitor identity fields are deliberately masked by the platform:
 
 ```json
 {
@@ -846,11 +861,26 @@ Referer: https://subastas.secop.gov.co/eauctions.site/?auctionId=e66a68a3-a14b-4
 Sec-Fetch-Dest: empty
 Sec-Fetch-Mode: cors
 Sec-Fetch-Site: same-origin
-User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<IP_REDACTED> Safari/537.36
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
 sec-ch-ua: "Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
 sec-ch-ua-mobile: ?0
 sec-ch-ua-platform: "Windows"
 ```
+
+> **Redaction erratum (found and fixed).** An earlier `digest_har.py` used an IPv4
+> pattern that matched *any* four dotted numerals, and rewrote the Chrome version in
+> the line above to `<IP_REDACTED>`. The value shown is **DERIVED**, not re-read from
+> the capture: `sec-ch-ua` pins Chrome major **143**, and Chrome ≥ 101 sends the
+> frozen, reduced UA form `Chrome/<major>.0.0.0`. The redactor now requires exactly
+> four octets in 0–255, with no adjoining digit/dot and no preceding `/` (URL-host
+> `//` excepted), and is unit-tested in `tools/test_digest_har.py` over this exact
+> header corpus — no-false-positive (Chrome versions, `AppleWebKit/537.36`, decree
+> article numbers like `2.2.1.2.1.2.6`) and no-false-negative (IPv4 in `ipAddress`
+> fields and URL hosts, JWTs, rival NITs). No credential leaked either way — the
+> defect over-redacted; the tests exist because the same imprecision could in
+> principle under-match. IPv6 never appears in the corpus and is not handled; add a
+> pattern plus tests before digesting any capture that contains it. On the next raw
+> capture, regenerate this file to replace the derived UA value with the observed one.
 
 ## 3b. The audit trail — every action is recorded, including failures
 
@@ -1049,6 +1079,11 @@ The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that `PO
 ]
 ```
 
+This snapshot holds **27** `companyCode`s (including our own, `700961121`) — the
+connected set at the moment the frame was emitted, not the participant total. The
+canonical totals (48 registered, 44 ever connected) and their derivations are in
+§2b; the churn statistics over these same frames are in §5.
+
 #### `chat.onNewUserConnected`
 ```json
 [
@@ -1090,6 +1125,23 @@ The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that `PO
 - poll durations ms: min=54 p50=1450 max=110154
 - `auction.RequestClock` invocations: **41**
 - clock request interval s: min=0.0 p50=8.2 max=30.1
+
+### Connection churn — audit trail for the figures cited elsewhere
+
+DERIVED by `tools/analyze_timing.py` from the `chat.onConnected` /
+`onNewUserConnected` / `onUserDisconnected` frames in these same captures;
+independently reproducible by replaying `fixtures/auction-sasi-001-2026.json`.
+These are the numbers 00 (§3.2, §4.3) and 07 quote; this section is where they
+come from.
+
+| Measure | Value |
+|---|---:|
+| Distinct companies seen in the room (union, incl. us — see §2b) | 44 |
+| Companies that disconnected at least once | 36 (~82%) |
+| Total disconnect events in ~10 minutes | 100 |
+| Total reconnect events | 199 |
+| Median reconnects per company | 4 |
+| Worst-affected company | 19 reconnects |
 
 ## 6. SECOP II portal endpoints (tender discovery / workspace)
 
