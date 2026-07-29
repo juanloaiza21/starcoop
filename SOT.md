@@ -147,6 +147,23 @@ tracked as an open question.
 
 ---
 
+### 4.8 The captured auction had 44 live competitors — speed alone will not save us
+`GetAuction` listed **48 registered bidders**, and the SignalR `chat` roster shows
+**44 distinct companies actually connected** — a 92% participation rate, fighting over a
+single 115 M COP contract with a fixed 1% step.
+
+This is the most commercially important number in the whole evidence bundle, and it
+cuts against the naive framing of this project. In a 44-way race, *someone* will bid down
+to their own floor. Being the fastest clicker in that room wins a contract at a margin
+nobody wants. The lesson is that **auction selection matters at least as much as auction
+execution**: the highest-leverage work is filtering for auctions STARCOOP can actually win
+profitably — favourable geography, incumbent advantage, fewer qualified rivals — rather
+than bidding harder in commodity races.
+
+This is why [`docs/06-tender-discovery.md`](docs/06-tender-discovery.md) is not an
+afterthought, and why the bot's most valuable output on many auctions will be the
+decision **not to bid**.
+
 ## 5. Decisions already made
 
 These are settled. Reopening one requires a new entry in the decision log in
