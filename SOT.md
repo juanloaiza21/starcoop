@@ -53,6 +53,8 @@ The plan is split into chapters. Each is authoritative for its own subject.
 | [`docs/07-architecture.md`](docs/07-architecture.md) | The decided system design | You are building anything |
 | [`docs/08-roadmap.md`](docs/08-roadmap.md) | Phases, ticket backlog, open questions, decision log | You are picking up work |
 | [`docs/09-platform-vocabulary.md`](docs/09-platform-vocabulary.md) | The platform's own string table: every bid-validation error key | You are handling API errors |
+| [`docs/10-engineering-log.md`](docs/10-engineering-log.md) | What was built, what we got wrong, and where to improve | **You are picking this project up** |
+| [`docs/REVIEW-2026-07-28.md`](docs/REVIEW-2026-07-28.md) | Adversarial review of the chapter set | You want to know what was challenged |
 | [`fixtures/README.md`](fixtures/README.md) | Replayable auction trace and bid-legality conformance vectors | You are writing tests |
 
 ---

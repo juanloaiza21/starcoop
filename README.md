@@ -3,8 +3,11 @@
 Automated bidding agent for **SECOP II** electronic reverse auctions
 (*subastas inversas electrónicas*), built for **Cooperativa de Vigilantes STARCOOP CTA.**
 
-> **Start here → [`SOT.md`](SOT.md)** — the Source of Truth. It is the authoritative
-> record of decisions, known facts, and open questions.
+> **Start here → [`SOT.md`](SOT.md)** — the Source of Truth: decisions, known facts and
+> open questions.
+>
+> **Picking the project up? → [`docs/10-engineering-log.md`](docs/10-engineering-log.md)**
+> — what exists, what we got wrong, and where it should improve next.
 
 ---
 
@@ -66,6 +69,8 @@ docs/
   07-architecture.md         The decided system design
   08-roadmap.md              Phases, ticket backlog, open questions, decision log
   09-platform-vocabulary.md  The platform's own string table and bid-error taxonomy
+  10-engineering-log.md      What was built, what we got wrong, where to improve
+  REVIEW-2026-07-28.md       Adversarial review of the chapter set
   adr/                       Architecture decision records
 tools/
   digest_har.py              Distils HAR captures into the API contract, redacting secrets
