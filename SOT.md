@@ -95,12 +95,30 @@ Classic last-second sniping simply buys everyone else another three minutes. The
 behaviour is disciplined, floor-aware persistence — not speed alone. See
 [`docs/02-auction-mechanics.md`](docs/02-auction-mechanics.md).
 
-### 4.3 The connection drops mid-auction
-The screen recording shows the auction room displaying **`ESTADO: DESCONECTADO`**. In a
-ten-minute event, a dropped SignalR socket is the difference between winning and not
-competing at all. Reconnection, cursor recovery and state reconciliation against
-`GetSupplierBids` are first-class requirements, not error handling.
-See [`docs/03-client-protocol.md`](docs/03-client-protocol.md).
+### 4.3 The connection drops constantly — for everyone — and that is our opening
+The screen recording shows the auction room displaying **`ESTADO: DESCONECTADO`**. That
+is not an isolated glitch. Replaying the captured participant events quantifies it:
+
+| Measure | Value |
+|---|---|
+| Companies connected during the auction | 44 |
+| Companies that disconnected at least once | **36** |
+| Total disconnect events in ~10 minutes | 100 |
+| Total reconnect events | 199 |
+| Median reconnects per company | 4 |
+| Worst-affected competitor | 19 reconnects |
+
+**Roughly 80% of the room was fighting the connection rather than the auction.** A
+dropped socket in a ten-minute event is the difference between competing and not.
+
+This reframes the project. The bot's edge is not primarily that it computes prices
+faster than a human — it is that it *stays in the room* when most rivals cannot, and
+reconciles its state correctly when it does drop. Reconnection, cursor recovery and
+reconciliation against `GetSupplierBids` and the audit log are the core feature, not
+error handling. See [`docs/03-client-protocol.md`](docs/03-client-protocol.md).
+
+The numbers above are reproducible from
+[`fixtures/auction-sasi-001-2026.json`](fixtures/auction-sasi-001-2026.json).
 
 ### 4.4 The server owns time, and we must measure our distance from it
 The `auction.RequestClock` / `auction.ReceiveClock` pair is the authoritative clock. Local
