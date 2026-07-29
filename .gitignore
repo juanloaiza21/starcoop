@@ -57,3 +57,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# uv / venv
+.venv/
+uv.lock

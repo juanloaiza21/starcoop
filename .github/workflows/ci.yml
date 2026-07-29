@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Types
+        run: mypy
+
+      - name: Tests
+        run: pytest
+
+      # The captures leaked a live JWT once already. Fail the build rather than
+      # discover a credential in git history later.
+      - name: No credentials in the tree
+        run: |
+          set -e
+          if grep -rInE 'eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}' \
+               --exclude-dir=.git --exclude-dir=.venv . ; then
+            echo "::error::a JWT-shaped string is present in the tree"
+            exit 1
+          fi
+          if git ls-files | grep -E '\.(har|rar|mp4)$|TOKEN.*\.txt$' ; then
+            echo "::error::a raw capture is tracked; these carry session cookies"
+            exit 1
+          fi
+          echo "clean"
