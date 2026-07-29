@@ -10,13 +10,17 @@ HAR_DIR = sys.argv[1]
 OUT = sys.argv[2]
 
 JWT_RE = re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}')
+# The audit trail records the bidder's public IP on every action. It is STARCOOP's own
+# network origin, adds nothing analytically, and should not sit in version control.
+IPV4_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 SENSITIVE_HEADERS = {'authorization', 'cookie', 'set-cookie', 'x-xsrf-token'}
 
 
 def redact(s):
     if not isinstance(s, str):
         return s
-    return JWT_RE.sub('<JWT_REDACTED>', s)
+    s = JWT_RE.sub('<JWT_REDACTED>', s)
+    return IPV4_RE.sub('<IP_REDACTED>', s)
 
 
 def is_noise(url):
@@ -252,6 +256,56 @@ def main():
             w('```')
             w('')
             break
+
+    # ---- 3b. Audit trail
+    audit = None
+    for e in entries:
+        if 'GetEventLogs' in e['request']['url']:
+            try:
+                audit = json.loads(e['response']['content']['text'])
+            except Exception:
+                pass
+            if audit:
+                break
+    if audit:
+        w('## 3b. The audit trail — every action is recorded, including failures')
+        w('')
+        w('`GET /v1/audit/GetEventLogs` is a DataTables-style endpoint '
+          '(`draw`, `recordsTotal`, `recordsFiltered`, `data`). It is the authoritative '
+          'record of what happened, and therefore the reconciliation source after a '
+          'dropped connection.')
+        w('')
+        rows = audit.get('data') or []
+        w(f'Example rows ({len(rows)} of {audit.get("recordsTotal")} returned):')
+        w('')
+        w('```json')
+        w(redact(json.dumps(rows[:3], indent=2, ensure_ascii=False)))
+        w('```')
+        w('')
+        w('### Two consequences that shape the design')
+        w('')
+        w('**1. Rejected bids are permanently logged.** Note the row with description')
+        w('`"Error cuando presentado el lance. Problema: ..."`. A bid that fails validation')
+        w('is not discarded — it is written to an audit trail that the contracting entity')
+        w('can read. A bot that sprays speculative bids would leave a visible record of')
+        w('malfunction on a government platform, attached to STARCOOP\'s name.')
+        w('')
+        w('This is the evidence behind the rule that **`ValidateBid` always precedes')
+        w('`SubmitBid`**: validation is free and leaves no trace, rejection is permanent.')
+        w('')
+        w('**2. The bidder\'s IP address is recorded on every action** (`ipAddress` field).')
+        w('The operator should know their network origin is attributable. The honest')
+        w('posture is to run the bot from a stable, attributable connection. Rotating or')
+        w('anonymising IPs would serve no legitimate purpose here and would look evasive in')
+        w('exactly the record a dispute would examine.')
+        w('')
+        w('`eventHistoryTypeCode` and `eventHistorySubTypeCode` are localization keys '
+          '(e.g. `Logs_Search_Bid`, `Logs_Search_NewBid`, `Logs_Search_StartBidding`) — '
+          'resolve them via the vocabulary in `09-platform-vocabulary.md`.')
+        w('')
+        w('The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that '
+          '`POST /v1/audit/SetStartBiddingAudit` must be called before bidding begins.')
+        w('')
 
     # ---- 4. SignalR protocol
     w('## 4. SignalR realtime protocol')

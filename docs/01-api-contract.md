@@ -575,7 +575,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_NewBid",
       "registerDate": "2026-03-02T20:31:07.0495764Z",
       "description": "Error cuando presentado el lance. Problema: El valor total tiene que ser inferior al valor de su último lance para la subasta actual. La licitación tiene que ser inferior al último lance más la diferencia mínima total (1.156.705,23 COP)",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -583,7 +583,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_StartBidding",
       "registerDate": "2026-03-02T20:31:03.0025611Z",
       "description": "Comenzar Lances",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -591,7 +591,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_StartBidding",
       "registerDate": "2026-03-02T20:30:27.6078527Z",
       "description": "Comenzar Lances",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -599,7 +599,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_NewBid",
       "registerDate": "2026-03-02T20:30:27.353692Z",
       "description": "Error cuando presentado el lance. Problema: El valor total tiene que ser inferior al valor de su último lance para la subasta actual. La licitación tiene que ser inferior al último lance más la diferencia mínima total (1.156.705,23 COP)",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -615,7 +615,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_MessengerLogin",
       "registerDate": "2026-03-02T20:29:51.1840302Z",
       "description": "Usuario conectado",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -623,7 +623,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_MessengerLogout",
       "registerDate": "2026-03-02T20:28:23.4117285Z",
       "description": "Usuario desconectado",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -631,7 +631,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_MessengerLogin",
       "registerDate": "2026-03-02T20:25:17.3058429Z",
       "description": "Usuario conectado",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -639,7 +639,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_MessengerLogin",
       "registerDate": "2026-03-02T20:25:06.1623129Z",
       "description": "Usuario conectado",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     },
     {
@@ -647,7 +647,7 @@ Response (200):
       "eventHistorySubTypeCode": "Logs_Search_NewUser",
       "registerDate": "2026-03-02T20:25:06.1543129Z",
       "description": "Crear nuevo usuario",
-      "ipAddress": "186.31.35.27",
+      "ipAddress": "<IP_REDACTED>",
       "userCode": "700961121"
     }
   ]
@@ -849,11 +849,67 @@ Referer: https://subastas.secop.gov.co/eauctions.site/?auctionId=e66a68a3-a14b-4
 Sec-Fetch-Dest: empty
 Sec-Fetch-Mode: cors
 Sec-Fetch-Site: same-origin
-User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<IP_REDACTED> Safari/537.36
 sec-ch-ua: "Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"
 sec-ch-ua-mobile: ?0
 sec-ch-ua-platform: "Windows"
 ```
+
+## 3b. The audit trail — every action is recorded, including failures
+
+`GET /v1/audit/GetEventLogs` is a DataTables-style endpoint (`draw`, `recordsTotal`, `recordsFiltered`, `data`). It is the authoritative record of what happened, and therefore the reconciliation source after a dropped connection.
+
+Example rows (10 of 10 returned):
+
+```json
+[
+  {
+    "eventHistoryTypeCode": "Logs_Search_Bid",
+    "eventHistorySubTypeCode": "Logs_Search_NewBid",
+    "registerDate": "2026-03-02T20:31:07.0495764Z",
+    "description": "Error cuando presentado el lance. Problema: El valor total tiene que ser inferior al valor de su último lance para la subasta actual. La licitación tiene que ser inferior al último lance más la diferencia mínima total (1.156.705,23 COP)",
+    "ipAddress": "<IP_REDACTED>",
+    "userCode": "700961121"
+  },
+  {
+    "eventHistoryTypeCode": "Logs_Search_Bid",
+    "eventHistorySubTypeCode": "Logs_Search_StartBidding",
+    "registerDate": "2026-03-02T20:31:03.0025611Z",
+    "description": "Comenzar Lances",
+    "ipAddress": "<IP_REDACTED>",
+    "userCode": "700961121"
+  },
+  {
+    "eventHistoryTypeCode": "Logs_Search_Bid",
+    "eventHistorySubTypeCode": "Logs_Search_StartBidding",
+    "registerDate": "2026-03-02T20:30:27.6078527Z",
+    "description": "Comenzar Lances",
+    "ipAddress": "<IP_REDACTED>",
+    "userCode": "700961121"
+  }
+]
+```
+
+### Two consequences that shape the design
+
+**1. Rejected bids are permanently logged.** Note the row with description
+`"Error cuando presentado el lance. Problema: ..."`. A bid that fails validation
+is not discarded — it is written to an audit trail that the contracting entity
+can read. A bot that sprays speculative bids would leave a visible record of
+malfunction on a government platform, attached to STARCOOP's name.
+
+This is the evidence behind the rule that **`ValidateBid` always precedes
+`SubmitBid`**: validation is free and leaves no trace, rejection is permanent.
+
+**2. The bidder's IP address is recorded on every action** (`ipAddress` field).
+The operator should know their network origin is attributable. The honest
+posture is to run the bot from a stable, attributable connection. Rotating or
+anonymising IPs would serve no legitimate purpose here and would look evasive in
+exactly the record a dispute would examine.
+
+`eventHistoryTypeCode` and `eventHistorySubTypeCode` are localization keys (e.g. `Logs_Search_Bid`, `Logs_Search_NewBid`, `Logs_Search_StartBidding`) — resolve them via the vocabulary in `09-platform-vocabulary.md`.
+
+The presence of `Logs_Search_StartBidding` ("Comenzar Lances") confirms that `POST /v1/audit/SetStartBiddingAudit` must be called before bidding begins.
 
 ## 4. SignalR realtime protocol
 
