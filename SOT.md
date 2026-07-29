@@ -10,7 +10,7 @@ repository, this document wins — or this document is wrong and must be fixed.*
 | **Owner** | Juan Loaiza |
 | **Beneficiary** | COOPERATIVA DE VIGILANTES STARCOOP CTA. (SECOP supplier code `700961121`) |
 | **Repository** | `git@github.com:juanloaiza21/starcoop.git` |
-| **Status** | 🟡 Planning complete — implementation not started |
+| **Status** | 🟢 Planning complete; domain implementation under way (offline only, nothing touches the live platform) |
 | **Last updated** | 2026-07-28 |
 
 ---
@@ -322,7 +322,22 @@ These are settled. Reopening one requires a new entry in the decision log in
 
 ## 7. Current state and what happens next
 
-**Status: planning complete, no implementation yet.**
+**Status: the plan is written and the pure domain is being built, test-first.**
+
+What exists and is proven offline:
+
+| Component | State |
+|---|---|
+| `domain/money` — integer centavos, both platform dialects | done |
+| `domain/rules` — bid legality, floor guard, next legal bid | done, driven by the conformance vectors |
+| `domain/clock` — server-time estimation with RTT compensation | done |
+| `domain/latency` — live submit budget (D-11) | done |
+| `domain/auction` — ruleset resolution, fail-closed on unknown shapes | done, multi-lot included |
+| `domain/replay` — offline replay of the captured auction | done, reproduces the ground truth |
+| Transport (SignalR), auth bootstrap, submit gateway, operator UI | **not started** |
+
+Nothing in the repository can reach the live platform yet, which is deliberate: the
+read-only observer phase comes before any code that can write.
 
 The immediate next actions are maintained in the "next three actions" section of
 [`docs/08-roadmap.md`](docs/08-roadmap.md). The full ticket backlog and the open-questions

@@ -121,5 +121,13 @@ live platform.
 
 ## Status
 
-🟡 **Planning complete. Implementation not started.** See
-[`docs/08-roadmap.md`](docs/08-roadmap.md) for the phased plan and the next three actions.
+🟢 **Plan written; pure domain implemented and tested offline. Nothing can reach the
+live platform yet** — that is deliberate, and the read-only observer phase comes before
+any code that can write.
+
+```bash
+uv venv --python 3.12 && uv pip install -e ".[dev]"
+pytest && ruff check src tests && mypy
+```
+
+See [`docs/08-roadmap.md`](docs/08-roadmap.md) for the phased plan and the next actions.
