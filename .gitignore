@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# SECRETS — never commit. The source captures contain LIVE session tokens.
+# ---------------------------------------------------------------------------
+*.har
+TOKEN*.txt
+*.jwt
+.env
+.env.*
+!.env.example
+auth-state.json
+storage-state.json
+secrets/
+captures/
+
+# Raw evidence (large binaries + PII). Keep out of git.
+*.mp4
+*.rar
+*.zip
+evidence/raw/
+frames/
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.pnpm-store/
+npm-debug.log*
+pnpm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Python tooling
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---------------------------------------------------------------------------
+# Runtime artefacts
+# ---------------------------------------------------------------------------
+logs/
+*.log
+run-logs/
+playwright-report/
+test-results/
+.playwright/
+
+# ---------------------------------------------------------------------------
+# OS / editor
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
