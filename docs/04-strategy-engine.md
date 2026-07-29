@@ -15,7 +15,7 @@
 | M1 | Reverse auction (`auctionTypeCode: "Reversed"`): **lower is better**; winner = best total at close under `BestPrice` evaluation, with per-lot/per-item structure | `GetAuctionSimple` | OBSERVED |
 | M2 | `AuctionbyProposal`: each supplier enters with an initial proposal; the min-decrement error text references "**su último lance**" — but [02 §5.2](02-auction-mechanics.md)'s four-observation table refutes both the pure own-last reading (R1/R2 ✗) and the pure best-bid reading (R3 ✗). The working model is **R4**: `ref := min(own_last_server, current_best)`, threshold `T ≤ ref − step_total`, with a fallback regime near zero that locks the ladder — normative as 02 RULES R-1/R-2 | `ValidateBid` observations, [02 §5](02-auction-mechanics.md) | DERIVED — fragile (O-SE1: four data points from one auction, two of them degenerate probes; it decides whether this is a public price war or a parallel self-improvement race) |
 | M3 | Minimum decrement δ: `minimumBidType: 1` ("Percentage" in `GetAuction` — the two endpoints cross-confirm the enum). Observed `minBid` = 1,156,705.23 COP = exactly 1.00% of `startPrice`. Hypothesis: δ = pct × startPrice, a **fixed absolute step**. A documented counter-configuration exists for the naive 1%-of-startPrice shortcut (the UNP SASI-064-2026 pliego specifies 2% of the last valid lance; documentary, not an API observation). Therefore: **δ is always taken from the server**, never computed locally | `ValidateBid.minBid` | DERIVED — VERIFY (O-SE2); server value authoritative regardless |
-| M4 | Money: COP, `decimalNum: 2`, `roundTypeCode: "Up"` → tick = 1 centavo. All engine arithmetic is **integer `Centavos`**; rounding is always `ROUND_CEILING` (upward = toward the safe side in a reverse auction) | config | OBSERVED |
+| M4 | Money: COP, `decimalNum: 2`, `roundTypeCode: "Up"` → tick = 1 centavo. All engine arithmetic is **integer `Centavos`**. Rounding direction is **not uniform**: *requirements* (the step, the threshold) round **up**, making the constraint stricter; *emissions* (the bid we send) round **down**, keeping them under the threshold. Rounding an emitted bid up lifts it above `ref − step` and the server rejects it — see 02 RULE M-5 | config | OBSERVED |
 | M5 | Time: 10-minute base window; a qualifying lance inside the last `extraTimeLastMinutesStartPeriod` (1 min) extends by `extraTimePeriod` (3 min); `extraTimeMaximumBids: null` → **unlimited extensions**. What *qualifies* is unresolved ([02 §7.3](02-auction-mechanics.md) dual reading, RULE X-3): the platform's own string for `activateExtraTimeWinner` — `Settings_Activate_Extra_Time_Winner` = *"Tiempo extra solo para lance ganador"* ([09](09-platform-vocabulary.md)) — is direct evidence for the **restrictive** reading (only a winning/winner-changing lance extends). The earlier claim "even the leader's own lance extends" is **ASSUMED and probably false**; per RULE X-3 the engine never plans a cycle that needs an extension to land (§7.3) | `GetAuctionSimple` values + locale bundle | values OBSERVED; trigger semantics ASSUMED (O-SE3) |
 | M6 | Two orthogonal state machines: `auctionStateCode` (lifecycle) and `auctionExecutionStateCode` (execution). Bidding requires both, from a fresh snapshot; reads can go **backwards** (regression guards live in the app layer, see [Architecture §5.2](07-architecture.md)) | live capture | OBSERVED |
 | M7 | Both human ValidateBid attempts **failed** in the real auction (`BidErrMin`, even on a 0-value payload) and Starcoop never landed a lance in 65 minutes. "My validity model disagrees with the server" is a first-class, *expected* state — not an edge case | recording + `GetEventLogs` | OBSERVED |
@@ -317,9 +317,13 @@ def next_legal_total(view: AuctionView) -> Centavos | None:
     t = ref - step                                 # 02 RULE R-2: T ≤ ref − step_total;
                                                    #   a full δ below the best also takes
                                                    #   serious rank 1 strictly
-    t = round_up_to_grid(t, view.ruleset)          # whole-peso ceil per 02 RULE M-5 — safe
-                                                   #   because step is already ceil-strict
-    return t if t >= view.floor else None          # floor is the stopping rule
+    t = round_down_to_grid(t, view.ruleset)        # 02 RULE M-5: REQUIREMENTS round up,
+                                                   #   EMISSIONS round down. `t` is the
+                                                   #   MAXIMUM legal bid; rounding it up
+                                                   #   lifts it above ref − step and the
+                                                   #   server rejects it.
+    return t if t >= view.floor else None          # floor is the stopping rule; never
+                                                   #   round back up to reach it
 
 
 def allocate_items(view: AuctionView, total: Centavos) -> dict[ItemId, Centavos]:

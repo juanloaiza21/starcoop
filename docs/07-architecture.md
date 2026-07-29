@@ -372,16 +372,20 @@ T_submit_deadline = endDate
                   − safety_margin             # ≥ 5 s
 ```
 
-The budget sums to `6 + 6 + 2 + 5 = 19 s`, rounded up to a 20 s working margin — exactly the conclusion of [02-auction-mechanics.md](02-auction-mechanics.md) §3.1: "stop initiating new bid cycles ≈ 20 s before endDate; **15 s is a hard cutoff**." The abort margin therefore defaults to 20 s and may never be configured below the 15 s hard cutoff; an 8 s value (an earlier draft of this table) would let the loop legally start a cycle whose own p99 budget needs ~12–14 s — the exact after-close landing the parameter exists to prevent — and would make the [00-context.md](00-context.md) §7.3 KPI ("Bid early-margin p100 > 10 s") unachievable. This table is the authority; [04-strategy-engine.md](04-strategy-engine.md) §7.3 mirrors it.
+The budget sums to `6 + 6 + 2 + 5 = 19 s`, rounded up to a 20 s working margin — exactly the conclusion of [02-auction-mechanics.md](02-auction-mechanics.md) §3.1: "stop initiating new bid cycles ≈ 20 s before endDate; **15 s is a hard cutoff**." The abort margin therefore defaults to 20 s and may never be configured below the 15 s hard cutoff; an 8 s value (an earlier draft of this table) would let the loop legally start a cycle whose own p99 budget needs ~12–14 s — the exact after-close landing the parameter exists to prevent — and would make the [00-context.md](00-context.md) §7.3 KPI ("Bid early-margin p100 > 10 s") unachievable. **Division of authority.** This table owns the *mechanical* deadlines — how late it is physically safe to start a submit cycle given measured latency. [04-strategy-engine.md](04-strategy-engine.md) §7.3 owns the *strategic* trigger `fire_at` — when we choose to act, and why we do not want to trip the extension. Neither chapter may restate the other's parameter as its own. The binding invariant across both is:
+
+> `fire_at` must always be earlier than `abort_after`, by at least one full submit budget.
+
+A configuration violating that invariant is refused at load time, because it describes a bot that intends to act after the point it has already decided is too late.
 
 | Parameter | Default | Rationale |
 |---|---|---|
-| `fire_at` | `end_at − 45 s` | inside the closing window W = 60 s, so the lance both scores and extends; 45 s absorbs the platform's own p90 ≈ 6.9 s REST latency plus a failed validate + one retry |
+| `fire_at` | **owned by [04-strategy-engine.md](04-strategy-engine.md) §7.3** — currently `end_at − 90 s` | *Not* set here. `fire_at` is a strategic choice, not a mechanical one, and an earlier draft of this table contradicted 04 outright: it fired at `end_at − 45 s` to land **inside** the 60 s closing window so the lance would extend the auction, while 04 fires at `end_at − 90 s` to land **outside** it so the auction can actually end with us ahead. Those are opposite doctrines and only one can be right. 04 owns it. This table constrains it only by the invariant below |
 | `revalidate_by` | `end_at − 30 s` | if `ValidateBid` has not returned by here, escalate the driver rung and alarm — it must lead `abort_after` by enough time (≥ 10 s) for one escalated attempt to start before the cutoff |
 | `abort_after` | `end_at − abort_margin_s`; `abort_margin_s` default **20 s**, hard floor **15 s** | derived from the budget above (6 + 6 + 2 + 5 = 19 s ≈ 20 s; 02 §3.1). Past this point a new submit cycle is not started: emit `SKIP_NO_TIME` + alarm instead of risking a lance that lands after close; an in-flight submit is never cancelled — its outcome is reconciled |
 | ENDGAME snapshot freshness | ≤ 2.5 s | stale state must not drive an endgame lance |
 
-The gateway additionally maintains a **live latency budget** — a running estimate of the current validate+submit round trip (SQLite latency stats, §2) — and commits the final bid while at least the p90 of that budget remains (decision D-11). The effective abort margin is **re-derived from that live budget** rather than trusted as a constant: `abort_margin_effective = max(live_p99(ValidateBid) + live_p99(SubmitBid) + clock_uncertainty + safety_margin, abort_margin_s, 15 s)` — the configured value and the 15 s hard cutoff are floors, and a platform having a slow day widens the margin automatically. `SKIP_NO_TIME` is loud by design: it means our margins were consumed and a human should be watching the TOMAR CONTROL button. Strategy-level rationale (why T−45 s, why never snipe): [04-strategy-engine.md](04-strategy-engine.md) §7.
+The gateway additionally maintains a **live latency budget** — a running estimate of the current validate+submit round trip (SQLite latency stats, §2) — and commits the final bid while at least the p90 of that budget remains (decision D-11). The effective abort margin is **re-derived from that live budget** rather than trusted as a constant: `abort_margin_effective = max(live_p99(ValidateBid) + live_p99(SubmitBid) + clock_uncertainty + safety_margin, abort_margin_s, 15 s)` — the configured value and the 15 s hard cutoff are floors, and a platform having a slow day widens the margin automatically. `SKIP_NO_TIME` is loud by design: it means our margins were consumed and a human should be watching the TOMAR CONTROL button. Strategy-level rationale (why we fire outside the closing window, and why sniping is impossible here): [04-strategy-engine.md](04-strategy-engine.md) §7.
 
 ### 5.7 Crash recovery and restart semantics
 
@@ -405,7 +409,28 @@ Nothing above says how the system learns it won or lost. This section does.
 
 ## 6. Floor enforcement — five independent layers
 
-The floor is expressed **per item, per lot, and per total**, in integer centavos, in a signed config file (the floor sheet — a legal document whose regulatory inputs, arithmetic, author, and approver are recorded; [05-compliance.md](05-compliance.md)). The layers are *independent*: different code, different data sources, separately reviewed — each would stop a below-floor lance even if all the others were deleted. How the floor number itself is computed is [04-strategy-engine.md](04-strategy-engine.md) §4; this section is the enforcement architecture.
+The floor is expressed **per item, per lot, and per total**, in integer centavos, in a signed config file (the floor sheet — a legal document whose regulatory inputs, arithmetic, author, and approver are recorded; [05-compliance.md](05-compliance.md)). **What the layers actually guarantee — stated honestly, because overclaiming here is how a
+safety story stops being one.** They are *partially* independent, and the differences matter:
+
+- **L1 and L2 are genuinely redundant at runtime.** Either alone would stop a below-floor
+  lance. But they share the `guard/` package, so they share an author, a review, and a
+  version pin — a single bad change can plausibly reach both. Hardening that (separate
+  ownership, differential review) is an open task, not a solved problem.
+- **L0 stops nothing at runtime.** It is config-time provenance: who computed the sheet,
+  from what inputs, and who approved it.
+- **L4 cannot stop anything.** It is post-submit detection and containment. A lance is
+  irrevocable; L4 exists to notice and to halt what comes next.
+- **All layers share one input: the floor sheet itself.** Nothing in the runtime validates
+  that the sheet's own arithmetic is correct or lawful. As
+  [08-roadmap.md](08-roadmap.md) OQ-07 puts it, *a wrong FloorSheet defeats all five guard
+  layers from above*. The control for that is human — an independent second computation,
+  by a different person using a different method, that must agree before the sheet is
+  signed ([05-compliance.md](05-compliance.md) §5).
+
+So: the layers reliably enforce **the number on the approved sheet**. They do not, and
+cannot, enforce that the number is the right one. How the floor number is computed is
+[04-strategy-engine.md](04-strategy-engine.md) §4; this section is the enforcement
+architecture.
 
 | Layer | Where | What it does |
 |---|---|---|

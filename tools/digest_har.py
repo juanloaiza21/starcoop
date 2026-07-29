@@ -6,28 +6,13 @@ Redacts JWTs/cookies so the output is safe to reason over and to commit.
 import json, glob, os, re, sys, collections
 from urllib.parse import urlparse, parse_qs, unquote
 
-# Guarded so the module is importable by tools/test_digest_har.py without arguments.
-HAR_DIR = sys.argv[1] if len(sys.argv) > 2 else None
-OUT = sys.argv[2] if len(sys.argv) > 2 else None
+HAR_DIR = sys.argv[1]
+OUT = sys.argv[2]
 
 JWT_RE = re.compile(r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}')
 # The audit trail records the bidder's public IP on every action. It is STARCOOP's own
 # network origin, adds nothing analytically, and should not sit in version control.
-#
-# Precision matters: the first version of this pattern (\b(?:\d{1,3}\.){3}\d{1,3}\b)
-# matched ANY four dotted numerals and mangled the Chrome version in the preserved
-# User-Agent header ("Chrome/143.0.0.0" -> "Chrome/<IP_REDACTED>"). The pattern now
-# requires four octets in 0-255, with no adjoining digit/dot, and no preceding "/"
-# (which is how product/version tokens like "Chrome/143.0.0.0" appear) — except the
-# "//" of a URL scheme, so IPs used as URL hosts are still caught.
-# Unit-tested in tools/test_digest_har.py against the real header corpus.
-_OCTET = r'(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
-IPV4_RE = re.compile(
-    r'(?<![\w.])'          # no adjoining word char or dot on the left
-    r'(?<!(?<!/)/)'        # no single preceding "/" (version token), "//" (URL) is fine
-    rf'{_OCTET}(?:\.{_OCTET}){{3}}'
-    r'(?![\w.])'           # no adjoining word char or dot on the right
-)
+IPV4_RE = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 SENSITIVE_HEADERS = {'authorization', 'cookie', 'set-cookie', 'x-xsrf-token'}
 
 # STARCOOP's own company code. Ours may appear in the clear; everyone else's is a real
@@ -221,11 +206,14 @@ def main():
             w('`companyName` is a generated pseudonym (`"Proveedor J"`), and `companyNIF`,')
             w('`companyContact` and `companyEmail` are all the sentinel `"Settings_Confidential"`.')
             w('')
-            w('> **`companyCode`, however, is the real Colombian NIT** and is resolvable against')
-            w('> public SECOP open data. The bot is therefore *capable* of de-anonymising every')
-            w('> rival. It must not. Doing so subverts a deliberate platform privacy control and')
-            w('> moves a bidder uncomfortably close to the coordination that Colombian law')
-            w('> criminalises. Use the bidder *count* and the anonymous price signals only.')
+            w('> **`companyCode` is a Vortal/SECOP supplier code — NOT the NIT.** STARCOOP\'s')
+            w('> supplier code is `700961121` while its NIT is a different number entirely, so')
+            w('> do not treat the two as interchangeable. The code is nonetheless resolvable to')
+            w('> a named company through SECOP\'s public datasets, which means the bot is')
+            w('> *capable* of de-anonymising every rival. It must not. Doing so subverts a')
+            w('> deliberate platform privacy control and moves a bidder uncomfortably close to')
+            w('> the coordination that Colombian law criminalises. Use the bidder *count* and')
+            w('> the anonymous price signals only.')
             w('')
 
     # ---- 3. Auth headers
@@ -498,5 +486,4 @@ def main():
     print(f'wrote {OUT} ({len(chr(10).join(out))} bytes)')
 
 
-if __name__ == '__main__':
-    main()
+main()
