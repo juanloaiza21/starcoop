@@ -1,0 +1,49 @@
+# ---------------------------------------------------------------------------
+# FLOOR SHEET — the lowest price we are authorised to bid.
+#
+# This is not a config file. It is the record of a commercial decision, and it is
+# the only thing standing between an automated bidder and a contract won at a loss.
+# Every guard layer in the bot enforces this sheet; none of them can tell you the
+# number on it is right.
+#
+# Copy this file, cost it properly, have a second person recompute it independently,
+# and get it approved before anyone arms the bot against a live auction.
+#
+# It is bound to ONE auction on purpose. Reusing a sheet costed for another tender
+# is precisely the mistake that binding prevents.
+# ---------------------------------------------------------------------------
+
+auction_id: "e66a68a3-a14b-4d8a-8f8e-fd6333ade7ca"   # from the auction room URL
+tender: "SASI-001-2026"
+currency: COP
+
+# --- provenance: required, the sheet will not load without it ---------------
+computed_by: "NOMBRE APELLIDO"
+computed_on: "2026-07-28"
+approved_by: "Consejo de Administración"
+approved_on: "2026-07-28"
+
+# What the number is built from. Be specific enough that a reviewer could redo it.
+# For security services this is dominated by the regulated minimum tariff -- bidding
+# below it is not merely unprofitable, it is unlawful. See docs/05-compliance.md.
+basis: >
+  Tarifa mínima Supervigilancia 2026 para vigilancia fija 24h,
+  más prestaciones sociales, dotación, supervisión y AIU 8%.
+
+# Who recomputed it independently, by a different method. Required before arming
+# for live bidding; a wrong sheet defeats every automated guard from above.
+independent_check_by: ""
+
+# --- the floors themselves ---------------------------------------------------
+# Amounts are in pesos with exactly two decimals. The lot floors must sum to at
+# least the total, and each lot's item floors to at least that lot -- otherwise
+# the total would authorise a bid the parts do not support.
+
+total_floor_cop: "90000000.00"
+
+lots:
+  - lot_id: "CO1.OTLN.68743791"
+    floor_cop: "90000000.00"
+    items:
+      - item_id: "16c20486-4219-45da-beaf-1ee35f123949"
+        floor_cop: "90000000.00"
