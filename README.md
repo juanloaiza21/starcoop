@@ -12,11 +12,22 @@ Automated bidding agent for **SECOP II** electronic reverse auctions
 
 Colombian public contracts are frequently awarded by reverse auction: qualified bidders
 undercut each other inside a ten-minute window and the lowest compliant price wins.
-Winning depends on reacting within seconds, holding a live connection, and knowing
-exactly when to stop. A human doing this in a browser is slow, gets disconnected, and
-cannot compute the profitable stopping point under pressure.
+A human doing this in a browser gets disconnected, loses track of the arithmetic under
+pressure, and cannot reliably judge when to stop.
 
 This project automates STARCOOP's **own** bids on STARCOOP's **own** account.
+
+## Where the advantage actually comes from
+
+Not speed. We measured the platform, and it is slow: a bid costs two sequential round
+trips whose 90th percentile is around seven seconds *each*. Reacting in milliseconds buys
+nothing.
+
+The edge is that **most of the room falls over**. In the auction we captured, 36 of the
+44 connected companies dropped at least once in ten minutes — 100 disconnects and 199
+reconnects, a median of 4 per company. A bidder that simply stays in the room, always
+computes a legal bid, and refuses to go below its floor is already ahead of four fifths
+of the field.
 
 ## What makes it hard
 
@@ -24,9 +35,11 @@ This project automates STARCOOP's **own** bids on STARCOOP's **own** account.
 |---|---|
 | Lower price wins | A bug that bids too low *wins at a loss* and binds the cooperative to deliver |
 | A bid in the final minute extends the auction by 3 minutes | Last-second sniping does not work; disciplined persistence does |
-| The connection drops mid-auction (observed) | Reconnection is a core feature, not error handling |
+| The platform's p90 response is ~7s, with 10s tails | You cannot decide at T-2s; a timeout does not mean the bid failed |
+| 82% of bidders disconnected at least once | Reconnection and state reconciliation are the core feature, not error handling |
+| The minimum step is 1% of the *initial* price | It never shrinks; computing it against the current price silently produces illegal bids |
 | Login is reCAPTCHA-gated | Sessions bootstrap through a real browser, assisted by a human |
-| The whole event lasts 10 minutes | Every decision is on a hard deadline |
+| 44 rivals in one auction | Choosing which auctions to enter matters as much as how to bid |
 
 ## The one rule
 
@@ -64,13 +77,16 @@ fixtures/
   bid-validation-vectors.json Conformance vectors for bid legality
 ```
 
-## Regenerating the API contract
+## Regenerating the derived artefacts
 
-The contract chapter is generated, not hand-written. Given a directory of HAR captures:
+The contract chapter, the vocabulary chapter and the fixtures are generated, not
+hand-written. Given a directory of HAR captures:
 
 ```bash
-python3 tools/digest_har.py         /path/to/har-directory docs/01-api-contract.md
-python3 tools/extract_vocabulary.py /path/to/har-directory docs/09-platform-vocabulary.md
+python3 tools/digest_har.py          /path/to/har-dir docs/01-api-contract.md
+python3 tools/extract_vocabulary.py  /path/to/har-dir docs/09-platform-vocabulary.md
+python3 tools/build_replay_fixture.py /path/to/har-dir fixtures/auction-sasi-001-2026.json
+python3 tools/analyze_timing.py      /path/to/har-dir      # prints latency + churn
 ```
 
 The tool redacts JWTs and sensitive headers so its output is safe to commit. Verify
