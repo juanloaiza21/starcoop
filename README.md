@@ -52,9 +52,11 @@ docs/
   06-tender-discovery.md     Finding and qualifying auctions worth entering
   07-architecture.md         The decided system design
   08-roadmap.md              Phases, ticket backlog, open questions, decision log
+  09-platform-vocabulary.md  The platform's own string table and bid-error taxonomy
   adr/                       Architecture decision records
 tools/
   digest_har.py              Distils HAR captures into the API contract, redacting secrets
+  extract_vocabulary.py      Extracts the platform vocabulary and error keys
 ```
 
 ## Regenerating the API contract
@@ -62,7 +64,8 @@ tools/
 The contract chapter is generated, not hand-written. Given a directory of HAR captures:
 
 ```bash
-python3 tools/digest_har.py /path/to/har-directory docs/01-api-contract.md
+python3 tools/digest_har.py         /path/to/har-directory docs/01-api-contract.md
+python3 tools/extract_vocabulary.py /path/to/har-directory docs/09-platform-vocabulary.md
 ```
 
 The tool redacts JWTs and sensitive headers so its output is safe to commit. Verify
