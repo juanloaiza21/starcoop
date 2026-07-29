@@ -69,6 +69,33 @@ It does **not** contain a successful `SubmitBid`, because neither captured bid a
 passed validation. Resolving that contract requires the read-only observer phase against
 a live auction. See the open-questions register in [`../docs/08-roadmap.md`](../docs/08-roadmap.md).
 
+## `bid-validation-vectors.json`
+
+Fourteen conformance vectors that any implementation of the bid-arithmetic rules must
+satisfy. Written to be run as a test suite before a single line of transport code exists.
+
+Vectors carry a confidence marker:
+
+| Confidence | Meaning | Count |
+|---|---|---:|
+| `GROUND_TRUTH` | Observed directly from a live platform rejection | 2 |
+| `DERIVED` | Follows from the confirmed minimum-step rule | 8 |
+| `PROJECT_RULE` | Our own safety rules; the platform will not enforce these | 4 |
+
+Two vectors are worth reading before implementing anything:
+
+- **V-006** guards the most likely silent correctness bug in the system. The minimum step
+  is a percentage of the *initial* price, so it stays a fixed 1 156 705,23 COP for the
+  whole auction. An implementation that recomputes 1% against the *current* price drifts
+  downward as the price falls and begins producing bids that look correct and get
+  rejected. A bid rejected inside the final minute cannot be retried in time.
+- **V-008** is a bid the platform would happily accept and that we must refuse, because
+  it breaches the floor. It is the vector that separates "legal" from "wise".
+
+Rule R5 — that a bidder's first bid must equal the base price — is deliberately **not**
+encoded as a vector. We have not verified it, and a passing test for an unverified rule
+manufactures confidence we have not earned.
+
 ## Privacy and safety
 
 Competitor company codes are replaced with stable pseudonyms (`COMPETITOR_01`, …) and
